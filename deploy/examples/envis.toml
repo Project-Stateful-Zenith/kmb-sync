@@ -3,27 +3,27 @@ database = "/var/lib/kmb-sync/sync.db"
 listen = "127.0.0.1:8650"
 
 [envis]
-host = "sql.example.internal"
+host = "mssql.plant.example"
 port = 1433
 database = "pqplusdb"
-user = "kmb-sync"
+user = "sync-writer"
 password_file = "/etc/kmb-sync/envis-password"
 trust_cert = true
 time_zone = "UTC"
 
 [[device]]
-name = "station-a"
-host = "192.0.2.10"
+name = "plant-hall-3"
+host = "198.51.100.90"
 packed = 6800
-path = ["Example", "Station A"]
+path = ["Plant", "Hall 3"]
 
 [[job]]
-name = "station-a-archives"
-device = "station-a"
+name = "hall-3-archives"
+device = "plant-hall-3"
 kind = "archive"
 archives = ["Main", "Log", "MainPQ", "Elmeter", "LB"]
 every = "1h"
-start_time = "00:05"
+start_time = "00:10"
 timeout = "15m"
 max_size = "8MiB"
 measurement = "default"

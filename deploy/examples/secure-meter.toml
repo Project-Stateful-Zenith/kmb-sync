@@ -3,40 +3,40 @@ database = "/var/lib/kmb-sync/sync.db"
 listen = "127.0.0.1:8650"
 
 [[device]]
-name = "tls-meter"
-host = "192.0.2.50"
+name = "secure-feeder"
+host = "203.0.113.61"
 tls = true
-tls_root = "04112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00"
-tls_pins = ["AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89"]
-credentials_file = "/etc/kmb-sync/tls-meter.cred"
-path = ["Example", "TLS meter"]
+tls_root = "047fb25bacb2542392ffc4a2888d507a6f46bf61cc45b27758f52be6a607ef5c14fa8799b23b0b6e1560b204a8362b47498285731e7d3e043ef2996eafdbe7bac1"
+tls_pins = ["EF:71:44:33:B2:78:8A:AC:D7:C1:10:F1:2F:DB:2D:5A:48:A4:55:56:66:20:57:89:2A:3E:5B:04:B3:AC:E1:F0"]
+credentials_file = "/etc/kmb-sync/secure-feeder.cred"
+path = ["Demo", "Secure Feeder"]
 
 [[device]]
-name = "encrypted-meter"
-host = "192.0.2.51"
-psk_file = "/etc/kmb-sync/encrypted-meter.psk"
-credentials_file = "/etc/kmb-sync/encrypted-meter.cred"
-connect_timeout = "10s"
-byte_timeout = "20s"
-path = ["Example", "Encrypted meter"]
+name = "psk-meter"
+host = "203.0.113.62"
+psk_file = "/etc/kmb-sync/psk-meter.psk"
+credentials_file = "/etc/kmb-sync/psk-meter.cred"
+connect_timeout = "8s"
+byte_timeout = "15s"
+path = ["Demo", "PSK Meter"]
 
 [[job]]
-device = "tls-meter"
+device = "secure-feeder"
 kind = "archive"
 archives = ["Main", "Elmeter"]
 every = "15m"
 max_size = "2MiB"
 
 [[job]]
-device = "encrypted-meter"
+device = "psk-meter"
 kind = "archive"
-archives = ["Main", "Elmeter"]
-every = "15m"
-max_size = "2MiB"
+archives = ["Main", "Log"]
+every = "30m"
+max_size = "3MiB"
 
 [[job]]
-device = "encrypted-meter"
+device = "psk-meter"
 kind = "clock"
 every = "1h"
 timeout = "20s"
-adjust_above = "2s"
+adjust_above = "3s"

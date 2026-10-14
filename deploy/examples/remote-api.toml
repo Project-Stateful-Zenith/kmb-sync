@@ -5,16 +5,16 @@ api_token_file = "/etc/kmb-sync/api-token"
 status_listen = "0.0.0.0:8651"
 status_api = true
 status_api_token_file = "/etc/kmb-sync/status-api-token"
-heartbeat = "1m"
-describe_every = "12h"
+heartbeat = "2m"
+describe_every = "8h"
 
 [[device]]
-name = "station-a"
-host = "192.0.2.10"
-path = ["Example", "Station A"]
+name = "office-tower"
+host = "192.0.2.120"
+path = ["Campus", "Office Tower"]
 
 [[job]]
-device = "station-a"
+device = "office-tower"
 kind = "archive"
 archives = ["Main", "Elmeter"]
 every = "15m"

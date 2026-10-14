@@ -11,7 +11,7 @@ kmb-sync reads one TOML file. It has four parts:
 
 ## Examples
 
-Every example uses made-up names and documentation addresses (`192.0.2.x`).
+Every example uses made-up names and documentation addresses (`192.0.2.x`, `198.51.100.x`, `203.0.113.x`).
 Copy the closest one and adapt it.
 
 | File | Shows |
@@ -55,7 +55,7 @@ sudo systemctl enable --now kmb-sync
 | Time | RFC 3339 with a zone | `"2026-01-01T00:00:00Z"`, `"2026-01-01T01:00:00+01:00"` |
 | Time of day | `HH:MM` or `HH:MM:SS`, local time | `"02:30"` |
 | Address | `IP:port` | `"127.0.0.1:8650"` |
-| Name | letters, digits, `-`, `_` and `.` | `"substation-north"` |
+| Name | letters, digits, `-`, `_` and `.` | `"riverside-sub"` |
 
 Secrets never go into the configuration. Options ending in `_file` name a
 file that holds the secret; give such files mode `0600` or `0640` and make
@@ -87,7 +87,7 @@ should not be visible.
 | `host` | required | IP address or host name of the meter or its gateway |
 | `port` | `2101`, or `7101` with `tls` | TCP port |
 | `address` | `1` | bus address of the meter behind the host |
-| `path` | `[name]` | where the meter's measurements sit in the object tree, e.g. `["Grid", "North", "Substation North"]` |
+| `path` | `[name]` | where the meter's measurements sit in the object tree, e.g. `["Network", "Riverside", "Riverside Substation"]` |
 | `credentials_file` | none | file with the meter login: user on the first line, password on the second |
 | `psk_file` | none | file with the meter's pre-shared key for encrypted links, Base64 of 32 bytes |
 | `tls` | `false` | connect over TLS; needs a build with `--features tls` |
