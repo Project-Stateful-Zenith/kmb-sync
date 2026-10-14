@@ -1,0 +1,35 @@
+[service]
+database = "/var/lib/kmb-sync/sync.db"
+listen = "127.0.0.1:8650"
+status_listen = "0.0.0.0:8651"
+max_concurrency = 4
+heartbeat = "5m"
+describe_every = "6h"
+
+[[device]]
+name = "station-a"
+host = "192.0.2.10"
+path = ["Example", "Station A"]
+
+[[job]]
+name = "station-a-archives"
+device = "station-a"
+kind = "archive"
+archives = ["Main", "Log", "Elmeter"]
+every = "15m"
+anchor = "2026-01-01T00:00:00Z"
+timeout = "5m"
+max_size = "2MiB"
+
+[[job]]
+device = "station-a"
+kind = "values"
+set = "ActData"
+every = "1m"
+timeout = "20s"
+
+[[job]]
+device = "station-a"
+kind = "clock"
+every = "1h"
+timeout = "20s"

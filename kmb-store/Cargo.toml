@@ -1,0 +1,24 @@
+[package]
+name = "kmb-store"
+description = "Persistent store of the kmb-sync collector: identities, archive definitions, records, cursors"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+crc32fast = "1.5.2"
+kmb.workspace = true
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+rusqlite = "0.40.2"
+serde_json = "1.0.154"
+tempfile = "3.27.0"

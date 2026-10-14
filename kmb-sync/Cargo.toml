@@ -1,0 +1,45 @@
+[package]
+name = "kmb-sync"
+description = "Always-on collector service for KMB/KMP meters"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+tls = ["kmb-tokio/tls", "dep:tokio-rustls"]
+
+[dependencies]
+kmb.workspace = true
+kmb-tokio.workspace = true
+kmb-store.workspace = true
+kmb-envis.workspace = true
+jiff = "0.2.38"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "io-util"] }
+tokio-util = { version = "0.7.20", features = ["rt"] }
+axum = "0.8.9"
+serde_json = "1.0.154"
+toml = "1.1.8"
+tracing = "0.1.44"
+humantime = "2.4.0"
+anyhow = "1.0.104"
+ureq = "3.4.2"
+serde = { version = "1.0.229", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring"], optional = true }
+time = { version = "0.3.55", features = ["formatting", "parsing", "macros"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+axum = "0.8.9"
+kmb.workspace = true
+kmb-store.workspace = true
+serde_json = "1.0.154"
+tempfile = "3.27.0"
+tokio = { version = "1.53.2", features = ["test-util"] }
+toml = "1.1.8"
+ureq = { version = "3.4.2", features = ["json"] }

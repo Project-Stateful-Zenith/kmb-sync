@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>kmb-sync</title>
+<style>
+:root {
+  --bg: oklch(0.985 0 0);
+  --card: oklch(1 0 0);
+  --fg: oklch(0.145 0 0);
+  --muted: oklch(0.556 0 0);
+  --faint: oklch(0.708 0 0);
+  --border: oklch(0.922 0 0);
+  --hover: oklch(0.97 0 0);
+  --up: oklch(0.6 0.15 152);
+  --warn: oklch(0.7 0.15 70);
+  --down: oklch(0.58 0.21 25);
+  --run: oklch(0.6 0.16 250);
+  --sel: oklch(0.55 0.17 265);
+  --empty: color-mix(in oklab, var(--fg) 8%, transparent);
+  --err-bg: color-mix(in oklab, var(--down) 7%, var(--card));
+  --err-border: color-mix(in oklab, var(--down) 22%, var(--card));
+  --tip-bg: oklch(0.205 0 0);
+  --tip-fg: oklch(0.985 0 0);
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: oklch(0.145 0 0);
+    --card: oklch(0.178 0 0);
+    --fg: oklch(0.985 0 0);
+    --muted: oklch(0.708 0 0);
+    --faint: oklch(0.556 0 0);
+    --border: oklch(1 0 0 / 9%);
+    --hover: oklch(1 0 0 / 3%);
+    --up: oklch(0.72 0.15 152);
+    --warn: oklch(0.82 0.14 80);
+    --down: oklch(0.68 0.19 25);
+    --run: oklch(0.7 0.14 250);
+    --sel: oklch(0.72 0.13 265);
+    --empty: oklch(1 0 0 / 8%);
+    --err-bg: color-mix(in oklab, var(--down) 9%, var(--card));
+    --err-border: color-mix(in oklab, var(--down) 25%, var(--card));
+    --tip-bg: oklch(0.985 0 0);
+    --tip-fg: oklch(0.145 0 0);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.45 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv11", "ss01";
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 40px 24px 64px; }
+header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+.sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.live { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+.tally { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--muted); }
+.tally b { color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.list { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.head, .job { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.6fr) minmax(0, 1fr) 150px; gap: 20px; align-items: start; }
+.head { padding: 10px 20px; font-size: 12px; color: var(--faint); border-bottom: 1px solid var(--border); }
+.head span:last-child { text-align: right; }
+.station { border-top: 1px solid var(--border); }
+.head + .station { border-top: 0; }
+.station-name { padding: 16px 20px 0; display: none; }
+.station.multi .station-name { display: block; }
+.station.multi .job .name { padding-left: 12px; }
+.job { padding: 16px 20px; transition: background .15s; }
+.station.multi .job { padding-top: 10px; padding-bottom: 12px; }
+.station.multi .job:last-child { padding-bottom: 16px; }
+.job:hover { background: var(--hover); }
+.name { min-width: 0; }
+.name .t { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name .u, .meta { color: var(--muted); font-size: 12px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { font-family: var(--sans); }
+
+.status { min-width: 0; }
+.state { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.state .when { color: var(--muted); font-weight: 400; }
+.dot { position: relative; width: 8px; height: 8px; flex: none; }
+.dot i, .dot b { position: absolute; inset: 0; border-radius: 50%; background: currentColor; }
+.dot b { animation: ping 1.8s cubic-bezier(0, 0, .2, 1) infinite; }
+.ok { color: var(--up); } .warn { color: var(--warn); } .bad { color: var(--down); } .busy { color: var(--run); } .idle { color: var(--faint); }
+.state .label { color: var(--fg); }
+.detail { color: var(--muted); font-size: 12.5px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.error {
+  margin-top: 8px; padding: 7px 10px; border-radius: 8px;
+  background: var(--err-bg); border: 1px solid var(--err-border);
+  color: var(--fg); font: 12px/1.5 var(--mono);
+  overflow-wrap: anywhere; cursor: pointer;
+}
+.error .x { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.error.open .x { display: block; white-space: pre-wrap; }
+.error.soft { background: color-mix(in oklab, var(--warn) 8%, var(--card)); border-color: color-mix(in oklab, var(--warn) 25%, var(--card)); }
+.error .k { color: var(--down); font-weight: 600; margin-right: 6px; font-family: var(--sans); }
+.error.soft .k { color: color-mix(in oklab, var(--warn) 70%, var(--fg)); }
+
+.bars { display: flex; gap: 2px; height: 26px; align-items: stretch; padding-top: 1px; }
+.bars span { flex: 1 1 0; min-width: 2px; max-width: 6px; border-radius: 2px; background: var(--empty); transition: opacity .15s, transform .15s; }
+.bars span.r-ok { background: color-mix(in oklab, var(--up) 78%, transparent); }
+.bars span.r-limited, .bars span.r-partial { background: var(--warn); }
+.bars span.r-failed, .bars span.r-timeout { background: var(--down); }
+.bars span.r-cancelled, .bars span.r-interrupted { background: var(--faint); }
+.bars span.r-running { background: var(--run); animation: pulse 1.6s ease-in-out infinite; }
+.bars:hover span { opacity: .45; }
+.bars span:hover { opacity: 1; transform: scaleY(1.08); }
+.traffic { font-size: 12px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+.traffic b { color: var(--fg); font-weight: 500; }
+.toggle {
+  margin-top: 6px; display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 6px;
+  font: inherit; font-size: 12px; color: var(--muted); background: transparent;
+  border: 1px solid var(--border); border-radius: 999px; cursor: pointer; transition: color .15s, border-color .15s, background .15s;
+}
+.toggle:hover { color: var(--fg); border-color: color-mix(in oklab, var(--fg) 25%, transparent); }
+.toggle svg { width: 12px; height: 12px; transition: transform .2s; }
+.toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.toggle .n { color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
+.archives { padding: 4px 20px 18px; }
+.archives .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--faint); margin: 0 0 10px; }
+.archives .legend span { display: inline-flex; align-items: center; gap: 6px; }
+.archives .legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.chip { border: 1px dashed var(--border); border-radius: 10px; padding: 9px 11px; min-width: 0; color: var(--faint); }
+.chip .top { display: flex; align-items: baseline; gap: 8px; }
+.chip .no { font-family: var(--mono); font-size: 11.5px; min-width: 18px; }
+.chip .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip .per { margin-left: auto; font-size: 11.5px; white-space: nowrap; }
+.chip .info { font-size: 11.5px; margin-top: 3px; overflow-wrap: anywhere; }
+.chip.on { border: 1px solid color-mix(in oklab, var(--sel) 45%, var(--card)); background: color-mix(in oklab, var(--sel) 7%, var(--card)); color: var(--muted); }
+.chip.on .nm, .chip.on .no { color: var(--fg); }
+.chip.on .no { color: var(--sel); font-weight: 600; }
+.chip.on.fail { border-color: var(--err-border); background: var(--err-bg); }
+.chip.on.fail .no { color: var(--down); }
+.chip.on.fail .info { color: var(--fg); font-family: var(--mono); font-size: 11px; }
+.chip.on.stale { border-color: color-mix(in oklab, var(--warn) 45%, var(--card)); background: color-mix(in oklab, var(--warn) 8%, var(--card)); }
+.chip.on.stale .no { color: color-mix(in oklab, var(--warn) 80%, var(--fg)); }
+.chip.on.stale b { font-weight: 600; color: color-mix(in oklab, var(--warn) 70%, var(--fg)); }
+.chip.missing { border: 1px solid color-mix(in oklab, var(--warn) 40%, var(--card)); color: var(--muted); }
+.chip.missing .no { color: color-mix(in oklab, var(--warn) 80%, var(--fg)); }
+.hist .detail { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--faint); }
+
+.next { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.next .t { font-weight: 500; font-family: var(--mono); font-size: 13.5px; }
+.next .detail { font-size: 12px; }
+
+#tip {
+  position: fixed; z-index: 10; pointer-events: none; opacity: 0; transform: translateY(4px);
+  transition: opacity .12s, transform .12s;
+  background: var(--tip-bg); color: var(--tip-fg); border-radius: 8px; padding: 8px 10px;
+  font-size: 12px; max-width: 320px; box-shadow: 0 8px 24px oklch(0 0 0 / 18%);
+}
+#tip.on { opacity: 1; transform: none; }
+#tip .h { font-weight: 600; display: flex; gap: 8px; align-items: center; }
+#tip .m { opacity: .7; font-variant-numeric: tabular-nums; }
+#tip .e { margin-top: 4px; font-family: var(--mono); font-size: 11.5px; opacity: .85; overflow-wrap: anywhere; }
+
+.empty { padding: 48px 20px; text-align: center; color: var(--muted); }
+.credit { margin-top: 28px; text-align: center; color: var(--faint); font-size: 11.5px; }
+.credit a { color: inherit; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+.credit a:hover { color: var(--muted); text-decoration-color: currentColor; }
+footer { margin-top: 14px; color: var(--faint); font-size: 12px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+@keyframes ping { 0% { opacity: .55; transform: scale(1); } 75%, 100% { opacity: 0; transform: scale(2.4); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .dot b, .bars span.r-running { animation: none; } }
+
+@media (max-width: 760px) {
+  .wrap { padding: 24px 16px 48px; }
+  .head { display: none; }
+  header { align-items: flex-start; }
+  .tally { order: 3; width: 100%; }
+  .next { white-space: normal; }
+  .next .detail { max-width: 150px; margin-left: auto; }
+  .job { grid-template-columns: minmax(0, 1fr) auto; gap: 10px 16px; }
+  .job .status { grid-column: 1 / -1; grid-row: 2; }
+  .job .hist { grid-column: 1 / -1; grid-row: 3; }
+  .job .next { grid-column: 2; grid-row: 1; }
+  .station.multi .job .name { padding-left: 0; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>kmb-sync</h1>
+      <div class="sub" id="sub">Stations</div>
+    </div>
+    <div class="tally" id="tally"></div>
+    <div class="live" id="live"><span class="dot idle"><i></i></span><span>Connecting</span></div>
+  </header>
+  <div class="list" id="list"><div class="empty">Loading</div></div>
+  <footer><span>Read only. Stations in configuration order.</span><span id="since"></span></footer>
+  <div class="credit">kmb-sync · open source under <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noopener noreferrer">Apache 2.0</a> · made by Project-Stateful-Zenith Contributors</div>
+</div>
+<div id="tip"></div>
+<script id="data" type="application/json">/*DATA*/</script>
+<script>
+"use strict";
+const POLL_MS = 5000;
+const FETCH_MS = 10000;
+const $ = (id) => document.getElementById(id);
+
+let data = null;
+let skew = 0;
+let lastOk = 0;
+let failed = false;
+let timer = null;
+const opened = new Set();
+const shown = new Set();
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "data") Object.assign(el.dataset, v);
+    else el.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null && c !== false) el.append(c.nodeType ? c : String(c));
+  return el;
+}
+const dot = (cls, ping) => h("span", { class: "dot " + cls }, h("i"), ping ? h("b") : null);
+
+const now = () => Date.now() + skew;
+function ago(ms) {
+  const s = Math.max(0, Math.round((now() - ms) / 1000));
+  if (s < 45) return "just now";
+  const m = Math.round(s / 60);
+  if (m < 60) return m + " min ago";
+  const hr = Math.floor(m / 60);
+  if (hr < 24) return hr + " h " + (m % 60 ? (m % 60) + " min " : "") + "ago";
+  return Math.floor(hr / 24) + " d ago";
+}
+function clockLen(s) {
+  s = Math.max(0, Math.round(s));
+  const hr = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  const p = (n) => String(n).padStart(2, "0");
+  return hr ? hr + ":" + p(m) + ":" + p(sec) : m + ":" + p(sec);
+}
+const hhmm = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+const stamp = (ms) => new Date(ms).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+const day = (ms) => new Date(ms).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+function bytes(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n / 1024).toFixed(1) + " KiB";
+  return (n / 1048576).toFixed(2) + " MiB";
+}
+function every(s) {
+  if (s % 86400 === 0) return s / 86400 + " d";
+  if (s % 3600 === 0) return s / 3600 + " h";
+  if (s % 60 === 0) return s / 60 + " min";
+  return s + " s";
+}
+
+const WORD = {
+  ok: ["Synced", "ok"], limited: ["Synced, byte limit", "warn"], partial: ["Partly synced", "warn"],
+  failed: ["Failed", "bad"], timeout: ["Timed out", "bad"], cancelled: ["Cancelled", "idle"],
+  interrupted: ["Interrupted", "idle"],
+};
+
+function view(job) {
+  const last = job.recent[0];
+  const done = job.recent.find((r) => r.outcome);
+  const outcome = job.last_outcome || (done && done.outcome) || null;
+  const finished = job.last_finished || (done && done.finished_at) || null;
+  let error = null, soft = false;
+  if (job.last_error && ["failed", "timeout"].includes(job.last_outcome)) error = job.last_error;
+  else if (job.last_summary && job.last_summary.errors.length) { error = job.last_summary.errors.join("\n"); soft = true; }
+  else if (!job.last_outcome && done && ["failed", "timeout", "partial"].includes(done.outcome) && done.detail) {
+    error = done.detail; soft = done.outcome === "partial";
+  }
+  if (outcome === "timeout" && !error) error = "the run took longer than its timeout";
+  const goodRun = job.recent.find((r) => ["ok", "limited", "partial"].includes(r.outcome));
+  return { last, outcome, finished, error, soft, goodRun };
+}
+
+function stateOf(job, v) {
+  if (job.running) return ["Syncing", "busy", true];
+  if (!job.enabled) return ["Disabled", "idle"];
+  if (job.paused) return ["Paused", "idle"];
+  if (!v.outcome) return ["Waiting for first run", "idle"];
+  const [w, c] = WORD[v.outcome] || [v.outcome, "idle"];
+  return [w, c];
+}
+
+function jobRow(st, job, multi) {
+  const v = view(job);
+  const [word, cls, ping] = stateOf(job, v);
+  const key = st.name + "/" + job.name;
+
+  const when = job.running && job.last_started
+    ? h("span", { class: "when", data: { since: job.last_started } })
+    : v.finished ? h("span", { class: "when", data: { ago: v.finished } }) : null;
+
+  const facts = [];
+  const lastRun = job.recent.find((r) => r.finished_at);
+  if (!job.running && lastRun && v.outcome && v.outcome !== "failed" && v.outcome !== "timeout") {
+    facts.push(lastRun.inserted.toLocaleString() + " rows", bytes(lastRun.bytes_rx + lastRun.bytes_tx));
+  }
+  if (job.failures > 1) facts.push(job.failures + " failures in a row");
+  if (["failed", "timeout"].includes(v.outcome) && v.goodRun) facts.push("last good sync " + ago(v.goodRun.finished_at));
+
+  const status = h("div", { class: "status" },
+    h("div", { class: "state " + cls }, dot(cls, ping), h("span", { class: "label" }, word), when),
+    facts.length ? h("div", { class: "detail" }, facts.join(" · ")) : null,
+    v.error ? h("div", {
+      class: "error" + (v.soft ? " soft" : "") + (opened.has(key) ? " open" : ""),
+      title: "Click to show all",
+      onclick: (e) => { e.currentTarget.classList.toggle("open"); opened.has(key) ? opened.delete(key) : opened.add(key); },
+    }, h("div", { class: "x" }, h("span", { class: "k" }, v.soft ? "Warning" : "Error"), v.error)) : null,
+  );
+
+  const runs = job.recent.slice().reverse();
+  const pad = Math.max(0, 48 - runs.length);
+  const bars = h("div", { class: "bars" },
+    Array.from({ length: pad }, () => h("span")),
+    runs.map((r) => h("span", { class: "r-" + (r.outcome || "running"), data: { run: JSON.stringify(r) } })));
+  const first = runs[0];
+  const hist = h("div", { class: "hist" }, bars,
+    h("div", { class: "detail" },
+      h("span", {}, first ? hhmm(first.started_at) : ""),
+      h("span", {}, runs.length ? runs.length + " runs" : "no runs yet")));
+
+  let nextMain, nextSub;
+  if (job.running) { nextMain = h("div", { class: "t", data: { since: job.last_started || now() } }); nextSub = "running"; }
+  else if (!job.enabled || job.paused) { nextMain = h("div", { class: "t" }, "—"); nextSub = job.paused ? "paused" : "disabled"; }
+  else if (job.next_run) { nextMain = h("div", { class: "t", data: { until: job.next_run } }); nextSub = hhmm(job.next_run) + " · every " + every(job.every_s); }
+  else { nextMain = h("div", { class: "t" }, "—"); nextSub = "every " + every(job.every_s); }
+
+  const name = multi
+    ? h("div", { class: "name" }, h("div", { class: "meta" }, job.name), h("div", { class: "u" }, job.kind))
+    : stationName(st);
+
+  return h("div", { class: "job" }, name, status, hist, h("div", { class: "next" }, nextMain, h("div", { class: "detail" }, nextSub)));
+}
+
+function stationName(st) {
+  return h("div", { class: "name" },
+    h("div", { class: "t", title: st.name }, st.name),
+    deviceLines(st),
+    trafficLine(st),
+    st.archives.length ? archiveToggle(st) : null);
+}
+
+const CHEVRON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>';
+function archiveHealth(st, a) {
+  if (!a.jobs.length) return { state: "off" };
+  if (a.offered === false) return { state: "missing" };
+  if (a.error) return { state: "fail" };
+  const jobs = st.jobs.filter((j) => a.jobs.includes(j.name));
+  const running = jobs.filter((j) => j.enabled && !j.paused);
+  const active = running.length > 0;
+  if (a.newest && a.period_ms && active) {
+    const every = Math.min(...running.map((j) => j.every_s)) * 1000;
+    const lag = now() - a.newest;
+    if (lag > 2 * every + a.period_ms + 120000) return { state: "stale", lag };
+  }
+  return { state: "ok" };
+}
+
+function behind(ms) {
+  const m = Math.round(ms / 60000);
+  if (m < 120) return m + " min behind";
+  const hr = Math.round(m / 60);
+  return hr < 48 ? hr + " h behind" : Math.round(hr / 24) + " d behind";
+}
+
+function when(ms) {
+  const same = new Date(now()).toDateString() === new Date(ms).toDateString();
+  return same ? hhmm(ms) : day(ms);
+}
+
+function archiveToggle(st) {
+  const on = st.archives.filter((a) => a.jobs.length).length;
+  const states = st.archives.map((a) => archiveHealth(st, a).state);
+  const flag = states.includes("fail") ? "bad" : states.some((x) => x === "stale" || x === "missing") ? "warn" : null;
+  const open = shown.has(st.name);
+  const b = h("button", {
+    class: "toggle", type: "button", "aria-expanded": String(open),
+    title: flag === "bad" ? "An archive failed in its last run" : flag ? "An archive is behind or missing" : null,
+    onclick: () => { shown.has(st.name) ? shown.delete(st.name) : shown.add(st.name); render(); },
+  }, flag ? dot(flag) : null,
+    h("span", {}, h("span", { class: "n" }, on), st.archives_known ? " of " + st.archives.length + " archives" : " archives"));
+  b.insertAdjacentHTML("beforeend", CHEVRON);
+  return b;
+}
+
+function period(ms) {
+  if (!ms) return "events";
+  if (ms % 3600000 === 0) return ms / 3600000 + " h";
+  if (ms % 60000 === 0) return ms / 60000 + " min";
+  return ms / 1000 + " s";
+}
+
+function archivePanel(st) {
+  const chips = st.archives.map((a) => {
+    const { state, lag } = archiveHealth(st, a);
+    let cls = "chip", info, tip = null;
+    const fresh = a.inserted != null ? a.inserted.toLocaleString() + " new last run" : null;
+    if (state === "missing") { cls += " missing"; info = "in the job, but the meter does not offer it"; }
+    else if (state === "fail") { cls += " on fail"; info = a.error; }
+    else if (state === "off") info = a.unsupported ? "not synced: " + a.unsupported : "not synced";
+    else if (!a.newest) { cls += " on"; info = a.synced_at ? "no records on the meter yet" : "synced from the next run"; }
+    else if (!a.period_ms) {
+      cls += " on";
+      info = ["last event " + when(a.newest), fresh].filter(Boolean).join(" · ");
+      tip = "Event archive: it only gets a record when something happens, so an old time is normal.";
+    } else {
+      cls += " on" + (state === "stale" ? " stale" : "");
+      info = state === "stale"
+        ? h("span", {}, "newest record " + when(a.newest) + " · ", h("b", {}, behind(lag)))
+        : ["newest record " + when(a.newest), fresh].filter(Boolean).join(" · ");
+      tip = state === "stale"
+        ? "The newest record in the database is older than two syncs plus one record period: this archive is not keeping up."
+        : "Time of the newest record of this archive in the database.";
+    }
+    if (state !== "off" && st.jobs.filter((j) => j.kind === "archive").length > 1) {
+      info = h("span", {}, info, " · " + a.jobs.join(", "));
+    }
+    return h("div", { class: cls, title: tip || a.name + " (archive " + a.archive + ")" },
+      h("div", { class: "top" }, h("span", { class: "no" }, a.archive), h("span", { class: "nm" }, a.name),
+        a.offered ? h("span", { class: "per" }, period(a.period_ms)) : null),
+      h("div", { class: "info" }, info));
+  });
+  return h("div", { class: "archives" },
+    h("div", { class: "legend" },
+      h("span", {}, h("i", { style: "background: var(--sel)" }), "synced"),
+      h("span", {}, h("i", { style: "background: var(--warn)" }), "behind"),
+      h("span", {}, h("i", { style: "background: var(--down)" }), "failed"),
+      h("span", {}, h("i", { style: "border: 1px dashed var(--faint)" }), "offered by the meter, not synced"),
+      st.archives_known ? null : h("span", {}, "the meter's archive list is read on the next run")),
+    h("div", { class: "chips" }, chips));
+}
+
+function trafficLine(st) {
+  const t = st.traffic || [];
+  if (!t.length) return null;
+  const at = (d) => t.find((x) => x.day === d);
+  const prev = new Date(data.today + "T12:00:00");
+  prev.setDate(prev.getDate() - 1);
+  const yday = prev.getFullYear() + "-" + String(prev.getMonth() + 1).padStart(2, "0") + "-" + String(prev.getDate()).padStart(2, "0");
+  const today = at(data.today), y = at(yday);
+  const label = (d) => new Date(d + "T12:00:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+  const title = "Bytes over the meter link per day\n" + t.slice().reverse()
+    .map((x) => label(x.day) + ": " + bytes(x.bytes) + " in " + x.runs + " runs").join("\n");
+  return h("div", { class: "traffic", title },
+    h("b", {}, bytes(today ? today.bytes : 0)), " today",
+    y ? h("span", {}, " · " + bytes(y.bytes) + " yesterday") : null);
+}
+
+function deviceLines(st) {
+  const host = (st.url.match(/\/\/([^/]+)/) || [])[1] || st.url;
+  const ip = host.replace(/:\d+$/, "");
+  const id = st.identity;
+  const ident = id ? ["SN " + id.device_no, "FW " + id.firmware].join(" · ") : null;
+  return [h("div", { class: "u", title: st.url }, ip), ident ? h("div", { class: "u" }, ident) : null];
+}
+
+function deviceError(st) {
+  const t = now();
+  if (st.locked_until && st.locked_until > t) {
+    return h("div", { class: "error", style: "margin: 0 20px 16px" },
+      h("span", { class: "k" }, "Locked"),
+      "connects refused until " + hhmm(st.locked_until) + " after " + st.connect_failures + " failed connects" +
+      (st.last_error ? ": " + st.last_error : ""));
+  }
+  return null;
+}
+
+function render() {
+  hideTip();
+  const list = $("list");
+  const stations = data.stations;
+  if (!stations.length) { list.replaceChildren(h("div", { class: "empty" }, "No devices configured.")); return; }
+  const head = h("div", { class: "head" }, h("span", {}, "Station"), h("span", {}, "Status"), h("span", {}, "Recent runs"), h("span", {}, "Next sync"));
+  const rows = stations.map((st) => {
+    const multi = st.jobs.length > 1;
+    return h("div", { class: "station" + (multi ? " multi" : "") },
+      h("div", { class: "station-name" }, stationName(st)),
+      st.jobs.length ? st.jobs.map((j) => jobRow(st, j, multi))
+        : h("div", { class: "job" }, stationName(st),
+            h("div", { class: "status" }, h("div", { class: "state idle" }, dot("idle"), h("span", { class: "label" }, "No jobs")))),
+      deviceError(st),
+      shown.has(st.name) && st.archives.length ? archivePanel(st) : null);
+  });
+  list.replaceChildren(head, ...rows);
+
+  const rank = { bad: 3, warn: 2, busy: 1, ok: 0, idle: 0 };
+  let ok = 0, warn = 0, bad = 0, busy = 0;
+  for (const st of stations) {
+    let worst = "ok";
+    for (const j of st.jobs) { const c = stateOf(j, view(j))[1]; if (rank[c] > rank[worst]) worst = c; }
+    if (st.locked_until && st.locked_until > now()) worst = "bad";
+    ({ ok: () => ok++, idle: () => ok++, busy: () => busy++, warn: () => warn++, bad: () => bad++ })[worst]();
+  }
+  const t = [h("span", {}, h("b", {}, stations.length), " stations")];
+  if (busy) t.push(h("span", { class: "busy" }, h("b", {}, busy), " syncing"));
+  if (warn) t.push(h("span", { class: "warn" }, h("b", {}, warn), " warnings"));
+  t.push(bad ? h("span", { class: "bad" }, h("b", {}, bad), " with errors") : h("span", {}, "no errors"));
+  $("tally").replaceChildren(...t);
+  $("since").textContent = "Service up since " + stamp(data.started_at);
+  document.title = (bad ? "(" + bad + ") " : "") + "kmb-sync";
+  tick();
+}
+
+function tick() {
+  const t = now();
+  for (const el of document.querySelectorAll("[data-until]")) {
+    const s = (+el.dataset.until - t) / 1000;
+    el.textContent = s > 0 ? "in " + clockLen(s) : "due";
+  }
+  for (const el of document.querySelectorAll("[data-since]")) el.textContent = (el.classList.contains("when") ? "for " : "") + clockLen((t - +el.dataset.since) / 1000);
+  for (const el of document.querySelectorAll("[data-ago]")) el.textContent = ago(+el.dataset.ago);
+  const live = $("live");
+  if (!lastOk) return;
+  const age = Math.round((Date.now() - lastOk) / 1000);
+  const since = age < 60 ? age + " s" : Math.round(age / 60) + " min";
+  const stale = failed || age * 1000 > 3 * POLL_MS;
+  live.replaceChildren(
+    stale ? dot("bad") : dot("ok", true),
+    h("span", {}, failed ? "Service unreachable, last update " + since + " ago"
+      : stale ? "No update for " + since : "Live"));
+}
+
+function load(doc, sent, got) {
+  data = JSON.parse(doc.getElementById("data").textContent);
+  skew = data.now - (sent + got) / 2;
+  lastOk = Date.now();
+  failed = false;
+  render();
+}
+
+async function poll() {
+  clearTimeout(timer);
+  try {
+    const sent = Date.now();
+    const res = await fetch(location.pathname, { cache: "no-store", signal: AbortSignal.timeout(FETCH_MS) });
+    if (!res.ok) throw new Error(res.status);
+    const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+    load(doc, sent, Date.now());
+  } catch (e) {
+    failed = true;
+    if (!data) $("list").replaceChildren(h("div", { class: "empty" }, "Cannot reach the service."));
+    tick();
+  }
+  if (!document.hidden) timer = setTimeout(poll, POLL_MS);
+}
+
+const tip = $("tip");
+function hideTip() { tip.classList.remove("on"); }
+document.addEventListener("mouseover", (e) => {
+  const bar = e.target.closest && e.target.closest(".bars span[data-run]");
+  if (!bar) { hideTip(); return; }
+  const r = JSON.parse(bar.dataset.run);
+  const [w, c] = r.outcome ? (WORD[r.outcome] || [r.outcome, "idle"]) : ["Running", "busy"];
+  const dur = r.finished_at ? clockLen((r.finished_at - r.started_at) / 1000) : null;
+  tip.replaceChildren(
+    h("div", { class: "h" }, h("span", { class: c }, dot(c)), w),
+    h("div", { class: "m" }, stamp(r.started_at) + (dur ? " · " + dur : "")),
+    r.outcome ? h("div", { class: "m" }, r.inserted.toLocaleString() + " rows · " + bytes(r.bytes_rx + r.bytes_tx)) : null,
+    r.detail ? h("div", { class: "e" }, r.detail.length > 300 ? r.detail.slice(0, 300) + "…" : r.detail) : null);
+  const b = bar.getBoundingClientRect();
+  tip.classList.add("on");
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  let x = Math.min(Math.max(8, b.left + b.width / 2 - tw / 2), innerWidth - tw - 8);
+  let y = b.top - th - 8;
+  if (y < 8) y = b.bottom + 8;
+  tip.style.left = x + "px";
+  tip.style.top = y + "px";
+});
+addEventListener("scroll", hideTip, { passive: true });
+
+document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+setInterval(tick, 1000);
+try { load(document, Date.now(), Date.now()); } catch { $("list").replaceChildren(h("div", { class: "empty" }, "No data in this page.")); }
+if (!document.hidden) timer = setTimeout(poll, POLL_MS);
+</script>
+</body>
+</html>

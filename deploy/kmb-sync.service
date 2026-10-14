@@ -1,0 +1,32 @@
+[Unit]
+Description=kmb-sync collector for KMB/KMP meters
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=kmb-sync
+Group=kmb-sync
+ExecStart=/usr/local/bin/kmb-sync serve --config /etc/kmb-sync/config.toml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+StateDirectory=kmb-sync
+ConfigurationDirectory=kmb-sync
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

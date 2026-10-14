@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["kmb-store", "kmb-envis", "kmb-sync"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+kmb = { git = "https://github.com/Project-Stateful-Zenith/zenith-kmb" }
+kmb-tokio = { git = "https://github.com/Project-Stateful-Zenith/zenith-kmb" }
+kmb-store = { path = "kmb-store" }
+kmb-envis = { path = "kmb-envis" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+unreachable = "deny"
+unimplemented = "deny"
+unchecked_time_subtraction = "deny"
+todo = "deny"
+string_slice = "deny"
+panic_in_result_fn = "deny"
+panic = "deny"
+exit = "deny"
+as_conversions = "deny"
