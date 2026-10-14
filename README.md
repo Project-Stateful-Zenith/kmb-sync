@@ -99,20 +99,21 @@ above) plus about 15 KB of fixed reads, about 35 s at 8 kB/s.
 
 ## Disclaimer
 
-This project is an independent implementation, made for interoperability
-with meters and databases its users own or operate. The code was written
-from a separately prepared specification of the protocol and of the
-database layout. No vendor source code is contained in or was copied into
-this repository, and no vendor keys, certificates or product tables are
-included.
-
-This project is not affiliated with, endorsed by or supported by the
-manufacturers of the meters or of ENVIS. All product names and trademarks
-belong to their respective owners and are used only to identify the
-devices and software this project works with.
-
-The software is provided "as is", without warranty of any kind. Use it at
-your own risk, especially against production databases.
+> [!WARNING]
+> This project is an independent implementation, made for interoperability
+> with meters and databases its users own or operate. The code was written
+> from a separately prepared specification of the protocol and of the
+> database layout. No vendor source code is contained in or was copied into
+> this repository, and no vendor keys, certificates or product tables are
+> included.
+>
+> This project is not affiliated with, endorsed by or supported by the
+> manufacturers of the meters or of ENVIS. All product names and trademarks
+> belong to their respective owners and are used only to identify the
+> devices and software this project works with.
+>
+> The software is provided "as is", without warranty of any kind. Use it at
+> your own risk, especially against production databases.
 
 ## License
 
