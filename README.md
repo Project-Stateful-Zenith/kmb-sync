@@ -44,16 +44,14 @@ key is built in.
 The service serves a read-only status page (`status_listen`, port 8651 in
 the example configuration): every station with its jobs, the last 48 runs,
 the next sync, link bytes today and yesterday, and per-archive state. It
-follows the browser's light or dark setting.
+uses Material 3 colours and follows the browser's light or dark setting.
 
 ![Status page](docs/status.png)
 
 <details>
-<summary>Archive details and dark mode</summary>
+<summary>Archive details of a station</summary>
 
 ![Archives of a station](docs/status-archives.png)
-
-![Status page in dark mode](docs/status-dark.png)
 
 </details>
 
