@@ -39,6 +39,66 @@ uncompressed P-256 point in hex, `04` followed by X and Y), `tls_pins`
 (SHA-256 fingerprints of accepted meter certificates), or both. No root
 key is built in.
 
+## Status page
+
+The service serves a read-only status page (`status_listen`, port 8651 in
+the example configuration): every station with its jobs, the last 48 runs,
+the next sync, link bytes today and yesterday, and per-archive state. It
+follows the browser's light or dark setting.
+
+![Status page](docs/status.png)
+
+<details>
+<summary>Archive details and dark mode</summary>
+
+![Archives of a station](docs/status-archives.png)
+
+![Status page in dark mode](docs/status-dark.png)
+
+</details>
+
+The screenshots use made-up stations, addresses and serial numbers.
+
+## Traffic
+
+Meters often sit behind slow links: mobile data, radio, or a shared line of
+a few kB/s. kmb-sync moves only what is new, so the link carries about what
+the meter produces.
+
+![Link traffic per day](docs/traffic-day.svg)
+
+Measured on a UMD-98 with 12 LocalBus feeders, polled hourly over a line of
+about 8 kB/s:
+
+| | Per day | Compared with the meter's output |
+| --- | --- | --- |
+| Archive data the meter produces | ~6.5 MB | 1x |
+| Previous polling service (ENVIS.Online) | ~670 MB | ~100x |
+| **kmb-sync** | **~6.8 MB** | **~1.05x, about 99 % less than before** |
+
+Both stored the same records: over a 30-hour window, 48,466 of 48,466 rows
+written by kmb-sync were byte for byte equal to the ones the previous
+service wrote. The difference is records sent again that were already
+stored.
+
+How kmb-sync keeps the link quiet:
+
+- **Reads only new records.** Each archive resumes behind the newest record
+  already stored, including archives that are stored per feeder.
+- **A real byte budget.** `max_size` limits the bytes per schedule period,
+  retries and manual runs included. Bytes are counted on the socket (TLS
+  included) and each read is cut to fit, so a run stops within one record
+  of its limit; the rest follows next period, never at once.
+- **Timeouts count link time only.** A run waits for the meter first; its
+  timeout starts when it holds the link, so the jobs of one meter cannot
+  pile up.
+- **Visible before and after.** `kmb-sync check` prints each meter's link
+  share and the bytes per day its limits allow; `kmb-sync runs` and
+  `kmb-sync traffic` show the bytes every run and every day actually took.
+
+An hourly pass carries the hour's new records (~0.27 MB on the station
+above) plus about 15 KB of fixed reads, about 35 s at 8 kB/s.
+
 ## Disclaimer
 
 This project is an independent implementation, made for interoperability

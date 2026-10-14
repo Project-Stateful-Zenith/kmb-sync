@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 236" width="760" height="236" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <style>
+    .bg { fill: #ffffff; }
+    .t { fill: #1f2328; font-size: 15px; font-weight: 600; }
+    .l { fill: #1f2328; font-size: 13px; }
+    .s { fill: #656d76; font-size: 12px; }
+    .v { fill: #1f2328; font-size: 13px; font-weight: 600; }
+    .grid { stroke: #d0d7de; stroke-width: 1; }
+    .old { fill: #cf222e; }
+    .new { fill: #1a7f37; }
+    .meter { fill: #8c959f; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .t, .l, .v { fill: #e6edf3; }
+      .s { fill: #9198a1; }
+      .grid { stroke: #30363d; }
+      .old { fill: #f85149; }
+      .new { fill: #3fb950; }
+      .meter { fill: #6e7681; }
+    }
+  </style>
+  <rect class="bg" width="760" height="236" rx="8"/>
+  <text class="t" x="24" y="34">Link traffic per day, one meter with 12 LocalBus feeders, polled hourly</text>
+
+  <line class="grid" x1="230" y1="56" x2="230" y2="196"/>
+
+  <text class="l" x="24" y="80">Archive data the meter produces</text>
+  <rect class="meter" x="230" y="68" width="5" height="18" rx="2"/>
+  <text class="v" x="243" y="82">6.5 MB</text>
+
+  <text class="l" x="24" y="124">Previous polling service</text>
+  <text class="s" x="24" y="140">ENVIS.Online, measured</text>
+  <rect class="old" x="230" y="112" width="500" height="18" rx="2"/>
+  <text class="v" x="646" y="126" fill="#ffffff" style="fill:#ffffff">670 MB</text>
+
+  <text class="l" x="24" y="174">kmb-sync, measured</text>
+  <rect class="new" x="230" y="162" width="5" height="18" rx="2"/>
+  <text class="v" x="243" y="176">6.8 MB · about 99 % less</text>
+
+  <text class="s" x="24" y="220">Same records stored. The link of this station carries about 8 kB/s.</text>
+</svg>
