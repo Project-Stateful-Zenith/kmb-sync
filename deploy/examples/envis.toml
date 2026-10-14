@@ -1,0 +1,29 @@
+[service]
+database = "/var/lib/kmb-sync/sync.db"
+listen = "127.0.0.1:8650"
+
+[envis]
+host = "sql.example.internal"
+port = 1433
+database = "pqplusdb"
+user = "kmb-sync"
+password_file = "/etc/kmb-sync/envis-password"
+trust_cert = true
+time_zone = "UTC"
+
+[[device]]
+name = "station-a"
+host = "192.0.2.10"
+packed = 6800
+path = ["Example", "Station A"]
+
+[[job]]
+name = "station-a-archives"
+device = "station-a"
+kind = "archive"
+archives = ["Main", "Log", "MainPQ", "Elmeter", "LB"]
+every = "1h"
+start_time = "00:05"
+timeout = "15m"
+max_size = "8MiB"
+measurement = "default"

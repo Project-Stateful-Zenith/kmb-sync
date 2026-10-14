@@ -1,0 +1,42 @@
+[service]
+database = "/var/lib/kmb-sync/sync.db"
+listen = "127.0.0.1:8650"
+
+[[device]]
+name = "tls-meter"
+host = "192.0.2.50"
+tls = true
+tls_root = "04112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00"
+tls_pins = ["AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89"]
+credentials_file = "/etc/kmb-sync/tls-meter.cred"
+path = ["Example", "TLS meter"]
+
+[[device]]
+name = "encrypted-meter"
+host = "192.0.2.51"
+psk_file = "/etc/kmb-sync/encrypted-meter.psk"
+credentials_file = "/etc/kmb-sync/encrypted-meter.cred"
+connect_timeout = "10s"
+byte_timeout = "20s"
+path = ["Example", "Encrypted meter"]
+
+[[job]]
+device = "tls-meter"
+kind = "archive"
+archives = ["Main", "Elmeter"]
+every = "15m"
+max_size = "2MiB"
+
+[[job]]
+device = "encrypted-meter"
+kind = "archive"
+archives = ["Main", "Elmeter"]
+every = "15m"
+max_size = "2MiB"
+
+[[job]]
+device = "encrypted-meter"
+kind = "clock"
+every = "1h"
+timeout = "20s"
+adjust_above = "2s"

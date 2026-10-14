@@ -1,0 +1,67 @@
+[service]
+database = "/var/lib/kmb-sync/sync.db"
+listen = "127.0.0.1:8650"
+status_listen = "0.0.0.0:8651"
+max_concurrency = 4
+
+[[device]]
+name = "substation-north"
+host = "192.0.2.10"
+path = ["Grid", "North", "Substation North"]
+
+[[device]]
+name = "solar-park-east"
+host = "192.0.2.21"
+path = ["Generation", "Solar Park East"]
+
+[[device]]
+name = "water-works"
+host = "192.0.2.33"
+address = 3
+path = ["Utilities", "Water Works"]
+
+[[job]]
+name = "north-archives"
+device = "substation-north"
+kind = "archive"
+archives = ["Main", "Log", "MainPQ", "Elmeter", "LB"]
+every = "15m"
+anchor = "2026-01-01T00:00:00Z"
+timeout = "5m"
+max_size = "4MiB"
+
+[[job]]
+name = "north-values"
+device = "substation-north"
+kind = "values"
+set = "ActData"
+every = "1m"
+timeout = "20s"
+
+[[job]]
+name = "east-archives"
+device = "solar-park-east"
+kind = "archive"
+archives = "all"
+every = "1h"
+anchor = "2026-01-01T00:05:00Z"
+timeout = "10m"
+max_size = "8MiB"
+start_from = "2026-01-01T00:00:00Z"
+
+[[job]]
+name = "water-archives"
+device = "water-works"
+kind = "archive"
+archives = ["Main", "Elmeter"]
+every = "24h"
+start_time = "02:30"
+timeout = "30m"
+max_size = "20MiB"
+
+[[job]]
+name = "north-clock"
+device = "substation-north"
+kind = "clock"
+every = "6h"
+timeout = "20s"

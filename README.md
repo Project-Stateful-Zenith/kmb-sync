@@ -32,12 +32,24 @@ kmb-sync status                   # ask the running service
 kmb-sync --help
 ```
 
-`deploy/` has an example configuration and a systemd unit.
+## Configuration
 
-A device with `tls = true` needs `tls_root` (the root CA public key as an
-uncompressed P-256 point in hex, `04` followed by X and Y), `tls_pins`
-(SHA-256 fingerprints of accepted meter certificates), or both. No root
-key is built in.
+**[deploy/README.md](deploy/README.md)** explains every option: the
+service, devices, the three job kinds, the ENVIS database, secret files and
+value formats, plus installing with the systemd unit.
+
+Ready-to-copy examples, all with made-up data:
+
+| Example | Shows |
+| --- | --- |
+| [minimal.toml](deploy/examples/minimal.toml) | one meter with archive, values and clock jobs |
+| [multi-station.toml](deploy/examples/multi-station.toml) | several meters, schedules and byte budgets |
+| [secure-meter.toml](deploy/examples/secure-meter.toml) | TLS, encrypted links, logins, clock adjustment |
+| [envis.toml](deploy/examples/envis.toml) | writing into an ENVIS database |
+| [remote-api.toml](deploy/examples/remote-api.toml) | API and status JSON for other hosts, with tokens |
+
+Check a configuration with `kmb-sync check -c FILE` before starting the
+service.
 
 ## Status page
 
