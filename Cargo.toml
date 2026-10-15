@@ -9,8 +9,8 @@ rust-version = "1.88"
 license = "Apache-2.0"
 
 [workspace.dependencies]
-kmb = { git = "https://github.com/Project-Stateful-Zenith/zenith-kmb" }
-kmb-tokio = { git = "https://github.com/Project-Stateful-Zenith/zenith-kmb" }
+kmb = { git = "https://github.com/Project-Stateful-Zenith/zenith-kmb", tag = "v1.1.3" }
+kmb-tokio = { git = "https://github.com/Project-Stateful-Zenith/zenith-kmb", tag = "v1.1.3" }
 kmb-store = { path = "kmb-store" }
 kmb-envis = { path = "kmb-envis" }
 
