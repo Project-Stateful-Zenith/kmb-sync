@@ -202,6 +202,14 @@ fn check(path: &std::path::Path) -> Result<()> {
         }
         None => writeln!(out, "status page off")?,
     }
+    match config.service.run_log_rotate {
+        Some(d) => writeln!(
+            out,
+            "run log rotates every {}, keeping the current and the previous period",
+            days_text(d)
+        )?,
+        None => writeln!(out, "run log kept forever")?,
+    }
     for d in &config.devices {
         writeln!(
             out,
@@ -226,6 +234,17 @@ fn check(path: &std::path::Path) -> Result<()> {
         writeln!(out, "{}", forecast_text(&f))?;
     }
     Ok(())
+}
+
+/// Whole days as `365d`; humantime would write `11months 30days 3h 50m 24s`.
+fn days_text(d: std::time::Duration) -> String {
+    const DAY: u64 = 86_400;
+    let secs = d.as_secs();
+    if d.subsec_nanos() == 0 && secs.is_multiple_of(DAY) {
+        format!("{}d", secs / DAY)
+    } else {
+        humantime::format_duration(d).to_string()
+    }
 }
 
 fn forecast_text(f: &kmb_sync::config::LinkForecast) -> String {

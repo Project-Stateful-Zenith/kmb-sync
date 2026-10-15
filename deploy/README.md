@@ -74,6 +74,7 @@ them readable by the service user only.
 | `max_concurrency` | `4` | jobs that may run at the same time, across all meters. Jobs of one meter never run at the same time |
 | `heartbeat` | `"5m"` | how often the service records that it is alive; after a restart it reports how long it was down |
 | `describe_every` | `"6h"` | how often a meter's self-description (its archives and fields) is read again, besides when its identity changes |
+| `run_log_rotate` | off | rotate the run log in periods of this length (at least `"1d"`, e.g. `"365d"`), keeping the current and the previous period. When a period ends, runs from before the previous period are deleted. Off, runs are kept forever |
 
 The status page itself never needs a token: it is read only and shows no
 secrets. Put it behind a firewall or reverse proxy if the station list

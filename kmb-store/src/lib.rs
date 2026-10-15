@@ -9,7 +9,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 const MIGRATE_1_TO_2: &str = "
 ALTER TABLE run ADD COLUMN bytes_rx INTEGER NOT NULL DEFAULT 0;
@@ -17,6 +17,12 @@ ALTER TABLE run ADD COLUMN bytes_tx INTEGER NOT NULL DEFAULT 0;
 ";
 const MIGRATE_2_TO_3: &str = "
 CREATE INDEX run_started ON run (started_at);
+";
+const MIGRATE_3_TO_4: &str = "
+CREATE TABLE run_log (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    period_start INTEGER NOT NULL
+);
 ";
 
 #[derive(Debug, thiserror::Error)]
@@ -171,6 +177,15 @@ pub struct TrafficDay {
     pub inserted: i64,
 }
 
+/// State of the run log after [`Store::rotate_runs`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RunLogPeriod {
+    /// Start of the current period, Unix milliseconds.
+    pub start: i64,
+    /// Runs deleted by this call.
+    pub deleted: usize,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Heartbeat {
     pub last_beat: i64,
@@ -276,6 +291,10 @@ CREATE TABLE heartbeat (
     last_beat      INTEGER NOT NULL,
     clean_shutdown INTEGER NOT NULL
 );
+CREATE TABLE run_log (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    period_start INTEGER NOT NULL
+);
 ";
 
 pub struct Store {
@@ -305,13 +324,19 @@ impl Store {
             }
             1 => {
                 conn.execute_batch(&format!(
-                    "BEGIN; {MIGRATE_1_TO_2} {MIGRATE_2_TO_3} \
+                    "BEGIN; {MIGRATE_1_TO_2} {MIGRATE_2_TO_3} {MIGRATE_3_TO_4} \
                      PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
                 ))?;
             }
             2 => {
                 conn.execute_batch(&format!(
-                    "BEGIN; {MIGRATE_2_TO_3} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
+                    "BEGIN; {MIGRATE_2_TO_3} {MIGRATE_3_TO_4} \
+                     PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
+                ))?;
+            }
+            3 => {
+                conn.execute_batch(&format!(
+                    "BEGIN; {MIGRATE_3_TO_4} PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;"
                 ))?;
             }
             SCHEMA_VERSION => {}
@@ -809,6 +834,47 @@ impl Store {
                 },
             )
             .optional()?)
+    }
+
+    /// Rotates the run log in periods of `period` milliseconds, keeping the
+    /// current and the previous period. The first period starts at the
+    /// oldest run, or at `now` when there is none. When a period ends, runs
+    /// from before the previous period are deleted. A `period` below 1 is
+    /// taken as 1.
+    pub fn rotate_runs(&mut self, now: i64, period: i64) -> Result<RunLogPeriod> {
+        let period = period.max(1);
+        let tx = self.conn.transaction()?;
+        let stored: Option<i64> = tx
+            .query_row("SELECT period_start FROM run_log WHERE id = 1", [], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        let start = match stored {
+            Some(start) => start,
+            None => tx.query_row("SELECT MIN(started_at) FROM run", [], |r| {
+                Ok(r.get::<_, Option<i64>>(0)?.map_or(now, |t| t.min(now)))
+            })?,
+        };
+        let ended = now.saturating_sub(start).checked_div(period).unwrap_or(0);
+        let (start, deleted) = if ended > 0 {
+            let start = start.saturating_add(ended.saturating_mul(period));
+            let deleted = tx.execute(
+                "DELETE FROM run WHERE started_at < ?1",
+                params![start.saturating_sub(period)],
+            )?;
+            (start, deleted)
+        } else {
+            (start, 0)
+        };
+        if stored != Some(start) {
+            tx.execute(
+                "INSERT INTO run_log (id, period_start) VALUES (1, ?1)
+                 ON CONFLICT (id) DO UPDATE SET period_start = ?1",
+                params![start],
+            )?;
+        }
+        tx.commit()?;
+        Ok(RunLogPeriod { start, deleted })
     }
 
     pub fn beat(&mut self, now: i64, clean_shutdown: bool) -> Result<()> {

@@ -66,7 +66,12 @@ pub struct Service {
     pub heartbeat: Duration,
     #[serde(default = "default_describe_every", with = "humantime_serde")]
     pub describe_every: Duration,
+    #[serde(default, with = "humantime_serde::option")]
+    pub run_log_rotate: Option<Duration>,
 }
+
+/// Shortest `run_log_rotate` accepted.
+pub const MIN_RUN_LOG_ROTATE: Duration = Duration::from_secs(24 * 3600);
 
 pub const DEFAULT_STATUS_LISTEN: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 8651);
@@ -424,6 +429,13 @@ impl Config {
         if self.service.max_concurrency == 0 {
             bail!("service.max_concurrency must be at least 1");
         }
+        if self
+            .service
+            .run_log_rotate
+            .is_some_and(|d| d < MIN_RUN_LOG_ROTATE)
+        {
+            bail!("service.run_log_rotate must be at least 1d");
+        }
         if let Some(zone) = self.envis.as_ref().and_then(|e| e.time_zone.as_deref()) {
             kmb_envis::pack::Calendar::new(zone)
                 .with_context(|| format!("envis.time_zone {zone:?}"))?;
@@ -775,6 +787,25 @@ every = "1h"
             Some("192.0.2.1:80".parse().unwrap())
         );
         assert!(with("nowhere").is_err());
+    }
+
+    #[test]
+    fn run_log_rotate() {
+        let c: Config = toml::from_str(EXAMPLE).unwrap();
+        assert_eq!(c.service.run_log_rotate, None);
+        let with = |v: &str| {
+            let text = EXAMPLE.replace(
+                "listen = \"127.0.0.1:8650\"",
+                &format!("listen = \"127.0.0.1:8650\"\nrun_log_rotate = \"{v}\""),
+            );
+            let mut c: Config = toml::from_str(&text).unwrap();
+            c.check().map(|()| c.service.run_log_rotate)
+        };
+        assert_eq!(
+            with("365d").unwrap(),
+            Some(Duration::from_secs(365 * 86_400))
+        );
+        assert!(with("12h").is_err());
     }
 
     #[test]

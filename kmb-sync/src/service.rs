@@ -513,6 +513,7 @@ impl Service {
     async fn heartbeat_loop(&self) {
         let mut tick = tokio::time::interval(self.config.service.heartbeat);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut first = true;
         loop {
             tokio::select! {
                 () = self.cancel.cancelled() => return,
@@ -522,6 +523,23 @@ impl Service {
             if let Err(e) = self.store.call(move |s| s.beat(now, false)).await {
                 tracing::error!("heartbeat failed: {e:#}");
             }
+            if let Some(period) = self.config.service.run_log_rotate {
+                self.rotate_run_log(now, clock::ms(period), first).await;
+            }
+            first = false;
+        }
+    }
+
+    async fn rotate_run_log(&self, now: i64, period: i64, starting: bool) {
+        match self.store.call(move |s| s.rotate_runs(now, period)).await {
+            Ok(p) if p.deleted > 0 || starting => tracing::info!(
+                period_start = %clock::rfc3339(p.start),
+                next_rotation = %clock::rfc3339(p.start.saturating_add(period)),
+                deleted = p.deleted,
+                "run log"
+            ),
+            Ok(_) => {}
+            Err(e) => tracing::error!("rotating the run log failed: {e:#}"),
         }
     }
 }

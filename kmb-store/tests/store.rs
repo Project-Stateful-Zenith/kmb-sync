@@ -276,7 +276,7 @@ fn version_1_gains_run_traffic() {
         let conn = rusqlite::Connection::open(&file).unwrap();
         conn.execute_batch(
             "ALTER TABLE run DROP COLUMN bytes_rx; ALTER TABLE run DROP COLUMN bytes_tx;
-             DROP INDEX run_started; PRAGMA user_version = 1;",
+             DROP INDEX run_started; DROP TABLE run_log; PRAGMA user_version = 1;",
         )
         .unwrap();
     }
@@ -301,7 +301,7 @@ fn version_2_gains_the_run_start_index() {
     drop(Store::open(&file).unwrap());
     {
         let conn = rusqlite::Connection::open(&file).unwrap();
-        conn.execute_batch("DROP INDEX run_started; PRAGMA user_version = 2;")
+        conn.execute_batch("DROP INDEX run_started; DROP TABLE run_log; PRAGMA user_version = 2;")
             .unwrap();
     }
     drop(Store::open(&file).unwrap());
@@ -317,4 +317,75 @@ fn version_2_gains_the_run_start_index() {
         .unwrap(),
     );
     assert_eq!((version, index), (kmb_store::SCHEMA_VERSION, 1));
+}
+
+#[test]
+fn run_log_keeps_two_periods() {
+    const YEAR: i64 = 365 * 86_400_000;
+    let mut s = Store::open_in_memory().unwrap();
+    let job_runs = |s: &Store| -> Vec<i64> {
+        let mut t: Vec<i64> = s
+            .runs(None, 100)
+            .unwrap()
+            .iter()
+            .map(|r| r.started_at)
+            .collect();
+        t.sort_unstable();
+        t
+    };
+    for t in [1000, 1000 + YEAR / 2] {
+        s.begin_run("j", "d", t).unwrap();
+    }
+    // The first period starts at the oldest run.
+    let p = s.rotate_runs(1000 + YEAR - 1, YEAR).unwrap();
+    assert_eq!((p.start, p.deleted), (1000, 0));
+    // After one period nothing is old enough to go: the previous period is kept.
+    s.begin_run("j", "d", 1000 + YEAR + 5).unwrap();
+    let p = s.rotate_runs(1000 + YEAR + 10, YEAR).unwrap();
+    assert_eq!((p.start, p.deleted), (1000 + YEAR, 0));
+    assert_eq!(job_runs(&s).len(), 3);
+    // After the second period the oldest period goes.
+    let p = s.rotate_runs(1000 + 2 * YEAR, YEAR).unwrap();
+    assert_eq!((p.start, p.deleted), (1000 + 2 * YEAR, 2));
+    assert_eq!(job_runs(&s), [1000 + YEAR + 5]);
+    // Calling again in the same period changes nothing.
+    let p = s.rotate_runs(1000 + 2 * YEAR + 1, YEAR).unwrap();
+    assert_eq!((p.start, p.deleted), (1000 + 2 * YEAR, 0));
+}
+
+#[test]
+fn run_log_catches_up_after_a_long_stop() {
+    const YEAR: i64 = 365 * 86_400_000;
+    let mut s = Store::open_in_memory().unwrap();
+    s.begin_run("j", "d", 0).unwrap();
+    assert_eq!(s.rotate_runs(10, YEAR).unwrap().start, 0);
+    s.begin_run("j", "d", 3 * YEAR + 1).unwrap();
+    // Three periods passed while stopped: periods stay on their grid and
+    // everything before the previous one goes.
+    let p = s.rotate_runs(3 * YEAR + 2, YEAR).unwrap();
+    assert_eq!((p.start, p.deleted), (3 * YEAR, 1));
+}
+
+#[test]
+fn run_log_starts_now_without_runs() {
+    let mut s = Store::open_in_memory().unwrap();
+    assert_eq!(s.rotate_runs(5000, 1000).unwrap().start, 5000);
+}
+
+#[test]
+fn version_3_gains_the_run_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("online.db");
+    {
+        let mut s = Store::open(&file).unwrap();
+        s.begin_run("j", "d", 7).unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&file).unwrap();
+        conn.execute_batch("DROP TABLE run_log; PRAGMA user_version = 3;")
+            .unwrap();
+    }
+    let mut s = Store::open(&file).unwrap();
+    assert_eq!(s.rotate_runs(100, 1000).unwrap().start, 7);
+    assert_eq!(s.runs(None, 10).unwrap().len(), 1);
 }
