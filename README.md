@@ -54,9 +54,10 @@ service.
 ## Status page
 
 The service serves a read-only status page (`status_listen`, port 8651 in
-the example configuration): every station with its jobs, the last 48 runs,
-the next sync, link bytes today and yesterday, and per-archive state. It
-follows the browser's light or dark setting.
+the example configuration): every station with its jobs, the last 48 runs
+between the time of the oldest shown and the latest poll, the next sync,
+link bytes today and yesterday, and per-archive state. The footer shows the
+running version. It follows the browser's light or dark setting.
 
 ![Status page](docs/status.png)
 
