@@ -151,7 +151,9 @@ async fn status_page(State(s): State<Arc<Service>>) -> Response {
         }
     };
     let data = data.to_string().replace('<', "\\u003c");
-    let page = STATUS_PAGE.replacen("/*DATA*/", &data, 1);
+    let page = STATUS_PAGE
+        .replacen("/*VERSION*/", env!("CARGO_PKG_VERSION"), 1)
+        .replacen("/*DATA*/", &data, 1);
     ([(header::CACHE_CONTROL, "no-store")], Html(page)).into_response()
 }
 
