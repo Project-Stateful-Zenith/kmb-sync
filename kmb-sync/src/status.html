@@ -326,11 +326,11 @@ function jobRow(st, job, multi) {
   const bars = h("div", { class: "bars" },
     Array.from({ length: pad }, () => h("span")),
     runs.map((r) => h("span", { class: "r-" + (r.outcome || "running"), data: { run: JSON.stringify(r) } })));
-  const first = runs[0];
+  const first = runs[0], latest = runs[runs.length - 1];
   const hist = h("div", { class: "hist" }, bars,
     h("div", { class: "detail" },
       h("span", {}, first ? hhmm(first.started_at) : ""),
-      h("span", {}, runs.length ? runs.length + " runs" : "no runs yet")));
+      h("span", {}, latest ? hhmm(latest.started_at) : "no runs yet")));
 
   let nextMain, nextSub;
   if (job.running) { nextMain = h("div", { class: "t", data: { since: job.last_started || now() } }); nextSub = "running"; }
