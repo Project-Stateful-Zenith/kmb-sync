@@ -1,10 +1,17 @@
 # Changelog
 
 All notable changes to `kmb-sync`, `kmb-store` and `kmb-envis`. The crates
-share one version, kept in step with
-[zenith-kmb](https://github.com/Project-Stateful-Zenith/zenith-kmb). The
-format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
-and the project uses [Semantic Versioning](https://semver.org/).
+share one version, which started at 1.1.3, the version of
+[zenith-kmb](https://github.com/Project-Stateful-Zenith/zenith-kmb) they were
+first released with. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
+[Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
+
+## [1.1.4] - 2026-10-16
+
+### `kmb-sync`
+
+- Status page: "kmb-sync" in the footer links to the project on GitHub.
 
 ## [1.1.3] - 2026-10-16
 
@@ -34,4 +41,5 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.1.4]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.1.4
 [1.1.3]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.1.3
