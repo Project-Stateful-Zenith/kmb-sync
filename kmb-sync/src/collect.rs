@@ -1210,6 +1210,8 @@ async fn clock_job(
         );
         out.notes
             .push(format!("clock set to {}", clock::kmb_rfc3339(sent)));
+        // the offset read above is gone now; keep it from flagging a fixed clock
+        cx.device.update(|s| s.clock_offset_ms = Some(0));
     }
     Ok(out)
 }

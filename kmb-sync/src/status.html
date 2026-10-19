@@ -82,6 +82,7 @@ h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
 .name .t { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .name .u, .meta { color: var(--muted); font-size: 12px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta { font-family: var(--sans); }
+.name .u.warn { color: var(--warn); }
 
 .status { min-width: 0; }
 .state { display: flex; align-items: center; gap: 8px; font-weight: 500; }
@@ -208,6 +209,7 @@ footer { margin-top: 14px; color: var(--faint); font-size: 12px; display: flex; 
 "use strict";
 const POLL_MS = 5000;
 const FETCH_MS = 10000;
+const DRIFT_WARN_MS = 60000;
 const $ = (id) => document.getElementById(id);
 
 let data = null;
@@ -459,12 +461,24 @@ function trafficLine(st) {
     y ? h("span", {}, " · " + bytes(y.bytes) + " yesterday") : null);
 }
 
+const drifted = (st) => st.clock_offset_ms != null && Math.abs(st.clock_offset_ms) > DRIFT_WARN_MS;
+function drift(ms) {
+  const a = Math.abs(ms);
+  const s = Math.round(a / 1000);
+  const len = a < 10000 ? (a / 1000).toFixed(1) + " s" : s < 60 ? s + " s"
+    : s < 3600 ? Math.floor(s / 60) + " min " + (s % 60) + " s" : Math.floor(s / 3600) + " h " + Math.floor(s % 3600 / 60) + " min";
+  return len + (ms > 0 ? " ahead" : ms < 0 ? " behind" : "");
+}
+
 function deviceLines(st) {
   const host = (st.url.match(/\/\/([^/]+)/) || [])[1] || st.url;
   const ip = host.replace(/:\d+$/, "");
   const id = st.identity;
   const ident = id ? ["SN " + id.device_no, "FW " + id.firmware].join(" · ") : null;
-  return [h("div", { class: "u", title: st.url }, ip), ident ? h("div", { class: "u" }, ident) : null];
+  const clock = st.clock_offset_ms == null
+    ? h("div", { class: "u" }, st.jobs.some((j) => j.kind === "clock") ? "clock not read yet" : "clock not checked (no clock job)")
+    : h("div", { class: "u" + (drifted(st) ? " warn" : ""), title: "Meter clock minus server clock, from the last clock job" }, "clock " + drift(st.clock_offset_ms));
+  return [h("div", { class: "u", title: st.url }, ip), ident ? h("div", { class: "u" }, ident) : null, clock];
 }
 
 function deviceError(st) {
@@ -474,6 +488,11 @@ function deviceError(st) {
       h("span", { class: "k" }, "Locked"),
       "connects refused until " + hhmm(st.locked_until) + " after " + st.connect_failures + " failed connects" +
       (st.last_error ? ": " + st.last_error : ""));
+  }
+  if (drifted(st)) {
+    return h("div", { class: "error soft", style: "margin: 0 20px 16px" },
+      h("span", { class: "k" }, "Clock"),
+      "meter clock is " + drift(st.clock_offset_ms) + " the server");
   }
   return null;
 }
@@ -501,6 +520,7 @@ function render() {
   for (const st of stations) {
     let worst = "ok";
     for (const j of st.jobs) { const c = stateOf(j, view(j))[1]; if (rank[c] > rank[worst]) worst = c; }
+    if (drifted(st) && rank[worst] < rank.warn) worst = "warn";
     if (st.locked_until && st.locked_until > now()) worst = "bad";
     ({ ok: () => ok++, idle: () => ok++, busy: () => busy++, warn: () => warn++, bad: () => bad++ })[worst]();
   }

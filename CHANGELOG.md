@@ -7,6 +7,15 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-10-19
+
+### `kmb-sync`
+
+- Added: the status page shows each meter's clock offset from the server,
+  as measured by its clock job, and warns when it is over 60 s. Meters
+  without a clock job say so. After `adjust_above` sets a meter's clock,
+  the offset shows 0 instead of the value from before.
+
 ## [1.2.1] - 2026-10-19
 
 ### `kmb-envis`
@@ -84,6 +93,7 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.3.0]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.0
 [1.2.1]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.2.1
 [1.2.0]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.2.0
 [1.1.4]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.1.4

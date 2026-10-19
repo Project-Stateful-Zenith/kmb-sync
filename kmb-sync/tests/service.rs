@@ -84,6 +84,7 @@ impl Meter {
         match req.command {
             1 => data(hex(IDENTIFY)),
             17 => data(hex(RTC)),
+            18 => data(vec![0]),
             112 | 114 => data(match req.payload[8] {
                 0 => hex(PHASE0),
                 1 => hex(PHASE1),
@@ -356,6 +357,19 @@ async fn values_and_clock_jobs() {
     assert!(c.notes[0].starts_with("clock offset"));
     assert!(!meter.lock().unwrap().requests.contains(&18));
     assert!(service.devices["m"].snapshot().clock_offset_ms.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_adjusted_clock_shows_no_offset() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    let port = start_meter(meter.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = config(&dir.path().join("t.db"), port, "adjust_above = \"1s\"");
+    let service = Service::new(cfg).unwrap();
+    let c = run(&service, "m-clock-1").await;
+    assert!(c.notes.iter().any(|n| n.starts_with("clock set to")), "{c:?}");
+    assert!(meter.lock().unwrap().requests.contains(&18));
+    assert_eq!(service.devices["m"].snapshot().clock_offset_ms, Some(0));
 }
 
 #[tokio::test(flavor = "multi_thread")]
