@@ -591,7 +591,8 @@ async fn waiting_for_the_meter_does_not_count_toward_the_timeout() {
     let port = start_meter(meter.clone()).await;
     let dir = tempfile::tempdir().unwrap();
     let mut c = config(&dir.path().join("t.db"), port, "");
-    c.jobs[0].timeout = std::time::Duration::from_millis(500);
+    // the run itself takes kmb-tokio's 300 ms SETTLE plus slow CI disks
+    c.jobs[0].timeout = std::time::Duration::from_millis(1500);
     let service = Arc::new(Service::new(c).unwrap());
     let held = service.devices["m"].session.lock().await;
     let s2 = service.clone();
@@ -599,7 +600,7 @@ async fn waiting_for_the_meter_does_not_count_toward_the_timeout() {
         let slot = s2.job("m-archive-1").unwrap().clone();
         s2.run_once(&slot).await.unwrap().1
     });
-    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
     drop(held);
     match queued.await.unwrap() {
         Outcome::Done(s) => assert_eq!(s.inserted, 1),
