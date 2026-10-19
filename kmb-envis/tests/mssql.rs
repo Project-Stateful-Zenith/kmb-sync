@@ -25,7 +25,10 @@ struct Server {
 }
 
 fn server() -> Option<Server> {
-    let v = std::env::var("KMB_ENVIS_TEST").ok()?;
+    let Ok(v) = std::env::var("KMB_ENVIS_TEST") else {
+        eprintln!("KMB_ENVIS_TEST is not set: MSSQL test skipped");
+        return None;
+    };
     let mut parts = v.splitn(3, ':');
     let host = parts.next()?.to_string();
     let port = parts.next()?.parse().ok()?;

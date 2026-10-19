@@ -20,10 +20,14 @@ pub struct Conn<'s> {
 }
 
 impl Conn<'_> {
-    pub fn db(&mut self) -> Result<&mut Envis> {
+    /// The connection, opened again if an error dropped it.
+    pub async fn db(&mut self) -> Result<&mut Envis> {
+        if self.db.is_none() {
+            self.db = Some(self.slot.connect().await?);
+        }
         self.db
             .as_mut()
-            .context("ENVIS database connection was dropped after an error")
+            .context("ENVIS database connection is missing")
     }
 
     pub fn mark_broken(&mut self) {
@@ -70,19 +74,23 @@ impl EnvisSlot {
             .pop();
         let db = match idle {
             Some(db) => db,
-            None => Box::pin(Envis::connect(&self.target))
-                .await
-                .with_context(|| {
-                    format!(
-                        "ENVIS database {} on {}",
-                        self.target.database, self.target.host
-                    )
-                })?,
+            None => self.connect().await?,
         };
         Ok(Conn {
             slot: self,
             db: Some(db),
         })
+    }
+
+    async fn connect(&self) -> Result<Envis> {
+        Box::pin(Envis::connect(&self.target))
+            .await
+            .with_context(|| {
+                format!(
+                    "ENVIS database {} on {}",
+                    self.target.database, self.target.host
+                )
+            })
     }
 }
 

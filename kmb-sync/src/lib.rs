@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 pub mod api;
 pub mod clock;
 pub mod collect;

@@ -176,38 +176,46 @@ impl Definition {
     }
 
     pub fn decode(&self, record: &[u8]) -> Result<Vec<DecodedField>, DefinitionError> {
-        let layout = self.layout()?;
-        let desc = self.description();
-        let values = layout
-            .decode(record)
-            .map_err(|e| DefinitionError::Record(e.to_string()))?;
-        let columns = layout.columns(&desc);
-        let time_index = layout
-            .slots
-            .iter()
-            .position(|s| s.field.name == "Time")
-            .unwrap_or(0);
-        Ok(values
-            .into_iter()
-            .zip(columns)
-            .zip(&layout.slots)
-            .skip(time_index.saturating_add(1))
-            .map(|(((_, value), column), slot)| {
-                let k = f64::from(column.k);
-                let value = if slot.field.typ() == TypeCode::DateTime {
-                    value_json(&value, 1.0)
-                } else {
-                    value_json(&value, k)
-                };
-                DecodedField {
-                    name: column.name,
-                    stat: column.stat.map(Stat::as_str),
-                    unit: column.unit,
-                    value,
-                }
-            })
-            .collect())
+        decode_with(&self.layout()?, &self.description(), record)
     }
+}
+
+/// [`Definition::decode`] with the layout and description built once, for
+/// decoding many records of one definition.
+pub fn decode_with(
+    layout: &Layout,
+    desc: &ArchiveDescription,
+    record: &[u8],
+) -> Result<Vec<DecodedField>, DefinitionError> {
+    let values = layout
+        .decode(record)
+        .map_err(|e| DefinitionError::Record(e.to_string()))?;
+    let columns = layout.columns(desc);
+    let time_index = layout
+        .slots
+        .iter()
+        .position(|s| s.field.name == "Time")
+        .unwrap_or(0);
+    Ok(values
+        .into_iter()
+        .zip(columns)
+        .zip(&layout.slots)
+        .skip(time_index.saturating_add(1))
+        .map(|(((_, value), column), slot)| {
+            let k = f64::from(column.k);
+            let value = if slot.field.typ() == TypeCode::DateTime {
+                value_json(&value, 1.0)
+            } else {
+                value_json(&value, k)
+            };
+            DecodedField {
+                name: column.name,
+                stat: column.stat.map(Stat::as_str),
+                unit: column.unit,
+                value,
+            }
+        })
+        .collect())
 }
 
 const fn is_one(k: f64) -> bool {

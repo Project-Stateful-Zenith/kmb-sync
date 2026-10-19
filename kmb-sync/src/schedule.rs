@@ -55,11 +55,7 @@ pub fn next_local(
         .checked_add(every.saturating_sub(1))
         .and_then(|b| b.checked_div(every))
         .unwrap_or(0);
-    let back = HOUR_MS
-        .checked_div(every)
-        .unwrap_or(0)
-        .saturating_add(1)
-        .min(MAX_STEPS_BACK);
+    let back = HOUR_MS.checked_div(every).unwrap_or(0).saturating_add(1);
     let mut best: Option<i64> = None;
     for k in steps.saturating_sub(back).max(0)..=steps {
         let span = jiff::SignedDuration::from_millis(k.saturating_mul(every));
@@ -83,7 +79,6 @@ pub fn next_local(
 }
 
 const HOUR_MS: i64 = 3_600_000;
-const MAX_STEPS_BACK: i64 = 240;
 
 #[must_use]
 pub fn after_failure(now: i64, failures: u32, every_ms: i64) -> i64 {
@@ -172,13 +167,13 @@ mod tests {
 
     #[test]
     fn local_start_times_keep_their_period_over_dst() {
-        let zone = jiff::tz::TimeZone::get("UTC").unwrap();
+        let zone = jiff::tz::TimeZone::get("Europe/Prague").unwrap();
         let ten = jiff::civil::time(10, 0, 0, 0);
         let ms = |s: &str| s.parse::<jiff::Timestamp>().unwrap().as_millisecond();
-        let q = 15 * 60_000;
-        for (from, to) in [
-            ("2026-10-24T20:00:00Z", "2026-10-25T06:00:00Z"),
-            ("2026-03-28T20:00:00Z", "2026-03-29T06:00:00Z"),
+        for (q, from, to) in [
+            (15 * 60_000, "2026-10-24T20:00:00Z", "2026-10-25T06:00:00Z"),
+            (15 * 60_000, "2026-03-28T20:00:00Z", "2026-03-29T06:00:00Z"),
+            (5_000, "2026-10-24T23:00:00Z", "2026-10-25T02:00:00Z"),
         ] {
             let mut t = next_local(ms(from), q, ten, &zone);
             while t < ms(to) {

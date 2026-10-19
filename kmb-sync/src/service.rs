@@ -269,7 +269,15 @@ impl Service {
         let mut next = job
             .enabled
             .then(|| schedule::first_run(clock::now_ms(), every, &anchor));
+        // a job without anchor runs at once after a start, still inside the
+        // period of the runs before; their bytes count against its budget
         let mut retry = false;
+        if matches!(anchor, schedule::Anchor::None) && job.task.byte_limit() > 0 {
+            match self.restore_period_bytes(&slot).await {
+                Ok(used) => retry = used > 0,
+                Err(e) => tracing::warn!(job = %job.name, "byte budget not restored: {e:#}"),
+            }
+        }
         let mut planned = clock::now_ms();
         loop {
             slot.update(|s| s.next_run = next);
@@ -323,6 +331,21 @@ impl Service {
             });
             planned = now;
         }
+    }
+
+    /// Sets the bytes used in the current period from the runs of the last
+    /// `every`, as after a restart, and returns them.
+    pub async fn restore_period_bytes(&self, slot: &JobSlot) -> Result<u64> {
+        let (job, since) = (
+            slot.job.name.clone(),
+            clock::now_ms().saturating_sub(clock::ms(slot.job.every)),
+        );
+        let used = self
+            .store
+            .call(move |s| s.job_bytes_since(&job, since))
+            .await?;
+        slot.update(|s| s.period_bytes = used);
+        Ok(used)
     }
 
     fn anchor(&self, job: &Job) -> schedule::Anchor {
@@ -447,6 +470,9 @@ impl Service {
     }
 
     pub async fn run(self: Arc<Self>) -> Result<()> {
+        for w in self.config.warnings() {
+            tracing::warn!("{w}");
+        }
         self.startup_checks().await?;
         let mut tasks = JoinSet::new();
         if let Some(addr) = self.config.service.listen {

@@ -21,8 +21,10 @@ const IDENTIFY: &str =
     "30 39 94 00 00 30 18 D1 00 02 00 A0 01 30 00 00 00 00 00 00 00 00 00 00 02 00";
 const PHASE0: &str =
     "00 00 00 02 00 02 00 00 4D 65 73 73 61 67 65 00 02 00 49 6E 73 74 61 6C 6C 00 FF";
-const PHASE1: &str = "00 00 00 03 00 03 43 6E 66 67 63 68 61 6E 67 65 00 00 00 00 01 00 55 6E 6F 6D 00 02 04 00 04 01 4E 61 6D 65 00 02 12 00 08 02";
-const PHASE2: &str = "00 00 00 03 00 03 0F 43 66 00 00 53 30 31 00 00 00 00 00";
+const PHASE1: &str = "00 00 00 04 00 04 43 6E 66 67 63 68 61 6E 67 65 00 00 00 00 01 00 55 6E 6F 6D 00 02 04 00 04 01 4E 61 6D 65 00 02 12 00 08 02
+    43 66 67 53 65 74 54 69 6D 65 00 00 03 00 04 01";
+// followed by the 8 bytes of CfgSetTime
+const PHASE2: &str = "00 00 00 04 00 04 0F 43 66 00 00 53 30 31 00 00 00 00 00";
 const RTC: &str = "00 01 00 00 00 C4 82 39 8E 00";
 const ARCH_PHASE0: &str = "00 00 00 01 00 01  06 00 00 0000 3F800000 00 4D 61 69 6E 00  FF";
 const ARCH_PHASE1: &str = "00 00 00 04 00 04
@@ -30,6 +32,19 @@ const ARCH_PHASE1: &str = "00 00 00 04 00 04
     53 75 6D 00         06 00 00 00 00 01 0001 01
     54 69 6D 65 00      06 00 00 00 00 13 0001 01
     55 31 00            06 00 00 00 00 04 0001 01";
+// Main and an Elmeter archive with the same record shape but a field named U2
+const TWO_ARCH_PHASE0: &str = "00 00 00 02 00 02
+    06 00 00 0000 3F800000 00 4D 61 69 6E 00
+    07 00 00 0000 3F800000 00 45 6C 6D 65 74 65 72 00  FF";
+const TWO_ARCH_PHASE1: &str = "00 00 00 08 00 08
+    4C 65 6E 67 74 68 00 06 00 00 00 00 01 0001 01
+    53 75 6D 00         06 00 00 00 00 01 0001 01
+    54 69 6D 65 00      06 00 00 00 00 13 0001 01
+    55 31 00            06 00 00 00 00 04 0001 01
+    4C 65 6E 67 74 68 00 07 00 00 00 00 01 0001 01
+    53 75 6D 00         07 00 00 00 00 01 0001 01
+    54 69 6D 65 00      07 00 00 00 00 13 0001 01
+    55 32 00            07 00 00 00 00 04 0001 01";
 
 fn record(time: u64, u1: f32) -> Vec<u8> {
     let mut r = vec![0x00, 0x10, 0, 0];
@@ -53,6 +68,8 @@ struct Meter {
     // the next `short_reads` record reads stop before slot `short_from`
     short_from: usize,
     short_reads: usize,
+    cfg_time: u64,
+    two_archives: bool,
 }
 
 impl Meter {
@@ -67,16 +84,23 @@ impl Meter {
         match req.command {
             1 => data(hex(IDENTIFY)),
             17 => data(hex(RTC)),
-            112 | 114 => data(hex(match req.payload[8] {
-                0 => PHASE0,
-                1 => PHASE1,
-                _ => PHASE2,
+            112 | 114 => data(match req.payload[8] {
+                0 => hex(PHASE0),
+                1 => hex(PHASE1),
+                _ => [hex(PHASE2), self.cfg_time.to_be_bytes().to_vec()].concat(),
+            }),
+            116 => data(hex(match (req.payload[8] == 0, self.two_archives) {
+                (true, false) => ARCH_PHASE0,
+                (false, false) => ARCH_PHASE1,
+                (true, true) => TWO_ARCH_PHASE0,
+                (false, true) => TWO_ARCH_PHASE1,
             })),
-            116 => data(hex(if req.payload[8] == 0 {
-                ARCH_PHASE0
-            } else {
-                ARCH_PHASE1
-            })),
+            31 => {
+                let mut notebook = [0u8; 64];
+                notebook[..9].copy_from_slice(b"Station A");
+                notebook[32..40].copy_from_slice(b"01 Meter");
+                data(notebook.to_vec())
+            }
             22 => {
                 let start =
                     usize::try_from(u32::from_be_bytes(req.payload[1..5].try_into().unwrap()))
@@ -529,6 +553,38 @@ async fn byte_limit_bounds_each_run_and_resumes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_restart_keeps_the_bytes_used_in_the_period() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    meter.lock().unwrap().records = (0..400).map(|i| record(minute(i), 1.0)).collect();
+    let port = start_meter(meter.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("t.db");
+    let limited = || {
+        let mut c = config(&db, port, "");
+        if let kmb_sync::config::Task::Archive { max_size, .. } = &mut c.jobs[0].task {
+            *max_size = Some(kmb_sync::config::ByteSize(2048));
+        }
+        Service::new(c).unwrap()
+    };
+    let service = limited();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    assert_eq!(service.run_once(&slot).await.unwrap().1.name(), "limited");
+    let used = slot.snapshot().period_bytes;
+    drop(service);
+
+    let service = limited();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    assert_eq!(service.restore_period_bytes(&slot).await.unwrap(), used);
+    let requests = meter.lock().unwrap().requests.len();
+    assert_eq!(service.run_once(&slot).await.unwrap().1.name(), "limited");
+    assert_eq!(
+        meter.lock().unwrap().requests.len(),
+        requests,
+        "budget was spent"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn waiting_for_the_meter_does_not_count_toward_the_timeout() {
     let meter = Arc::new(Mutex::new(Meter::default()));
     meter.lock().unwrap().records = vec![record(minute(0), 1.0)];
@@ -624,4 +680,115 @@ async fn control_api_refuses_browsers_and_foreign_hosts() {
     .await
     .unwrap();
     assert_eq!(statuses, [200, 403, 403]);
+}
+
+/// `KMB_ENVIS_TEST=host:port:password-file` of a test SQL Server, never a production one.
+fn envis_server() -> Option<(String, u16, std::path::PathBuf)> {
+    let Ok(v) = std::env::var("KMB_ENVIS_TEST") else {
+        eprintln!("KMB_ENVIS_TEST is not set: ENVIS test skipped");
+        return None;
+    };
+    let mut parts = v.splitn(3, ':');
+    Some((
+        parts.next()?.to_string(),
+        parts.next()?.parse().ok()?,
+        parts.next()?.into(),
+    ))
+}
+
+async fn sql(host: &str, port: u16, password: &std::path::Path, batch: &str) {
+    use tokio_util::compat::TokioAsyncWriteCompatExt;
+    let mut c = tiberius::Config::new();
+    c.host(host);
+    c.port(port);
+    let password = std::fs::read_to_string(password).unwrap();
+    c.authentication(tiberius::AuthMethod::sql_server("sa", password.trim()));
+    c.trust_cert();
+    let tcp = tokio::net::TcpStream::connect(c.get_addr()).await.unwrap();
+    let mut client = Box::pin(tiberius::Client::connect(c, tcp.compat_write()))
+        .await
+        .unwrap();
+    client
+        .simple_query(batch)
+        .await
+        .unwrap()
+        .into_results()
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn envis_archives_survive_a_missing_definition_and_follow_reconfiguration() {
+    let Some((host, port, password)) = envis_server() else {
+        return;
+    };
+    let name = format!("kmbsync_envis_{}", std::process::id());
+    let schema = include_str!("../../kmb-envis/tests/schema.sql");
+    sql(&host, port, &password, &format!(
+        "IF DB_ID('{name}') IS NOT NULL BEGIN ALTER DATABASE [{name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{name}] END; CREATE DATABASE [{name}] COLLATE SQL_Latin1_General_CP1_CI_AS"
+    )).await;
+    sql(&host, port, &password, &format!("USE [{name}];\n{schema}")).await;
+
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    {
+        let mut m = meter.lock().unwrap();
+        m.records = (0..3).map(|i| record(minute(i), 1.0)).collect();
+        (m.two_archives, m.cfg_time) = (true, 1000);
+    }
+    let port_m = start_meter(meter.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let envis = |allow_new: bool| {
+        format!(
+            "\n[envis]\nhost = \"{host}\"\nport = {port}\ndatabase = \"{name}\"\nuser = \"sa\"\n\
+             password_file = \"{}\"\ntrust_cert = true\ntime_zone = \"UTC\"\n\
+             allow_new_definitions = {allow_new}\n",
+            password.display()
+        )
+    };
+
+    // ENVIS learns a definition for Main only
+    let first = Service::new(config(&dir.path().join("a.db"), port_m, &envis(true))).unwrap();
+    assert_eq!(run(&first, "m-archive-1").await.inserted, 3);
+    drop(first);
+
+    // Elmeter has no definition: it fails alone, Main after it is still written
+    let mut c = config(&dir.path().join("b.db"), port_m, &envis(false));
+    if let kmb_sync::config::Task::Archive { archives, .. } = &mut c.jobs[0].task {
+        *archives = toml::from_str::<toml::Table>("a = [\"Elmeter\", \"Main\"]").unwrap()["a"]
+            .clone()
+            .try_into()
+            .unwrap();
+    }
+    let service = Service::new(c).unwrap();
+    meter.lock().unwrap().records.push(record(minute(3), 1.0));
+    let s = run(&service, "m-archive-1").await;
+    assert_eq!(s.inserted, 1, "{s:?}");
+    assert_eq!(s.errors.len(), 1, "{s:?}");
+    assert!(s.errors[0].starts_with("archive 6"), "{s:?}");
+
+    // the description is read again only after the meter was reconfigured
+    let descriptors = |m: &Meter| {
+        m.requests
+            .iter()
+            .map(|&r| usize::from(r == 116))
+            .sum::<usize>()
+    };
+    let before = descriptors(&meter.lock().unwrap());
+    run(&service, "m-archive-1").await;
+    assert_eq!(descriptors(&meter.lock().unwrap()), before);
+    meter.lock().unwrap().cfg_time = 2000;
+    run(&service, "m-archive-1").await;
+    assert!(descriptors(&meter.lock().unwrap()) > before);
+
+    // a dropped connection is opened again
+    let slot = service.envis.as_ref().unwrap();
+    let mut conn = slot.acquire().await.unwrap();
+    conn.mark_broken();
+    assert!(conn.db().await.is_ok());
+    drop(conn);
+    drop(service);
+
+    sql(&host, port, &password, &format!(
+        "ALTER DATABASE [{name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{name}]"
+    )).await;
 }

@@ -5,7 +5,7 @@ use kmb::Identify;
 use kmb::archive::uni::{self as uni_archive, Layout};
 use kmb::envelope::Psk;
 use kmb::uni::{ArchiveDescription, DataSet, Description, Value};
-use kmb_store::{Definition, DefinitionId, IdentityInfo};
+use kmb_store::{DefinitionId, IdentityInfo};
 use kmb_tokio::Client;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -273,11 +273,6 @@ impl Described {
                 id.software_version,
             )
     }
-}
-
-#[must_use]
-pub fn definition(layout: &Layout, desc: &ArchiveDescription) -> Definition {
-    Definition::from_layout(layout, desc)
 }
 
 pub struct DeviceSlot {

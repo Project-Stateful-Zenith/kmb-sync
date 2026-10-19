@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use kmb_store::{RecordQuery, Store};
@@ -185,6 +183,20 @@ fn serve(path: &std::path::Path) -> Result<()> {
 
 fn check(path: &std::path::Path) -> Result<()> {
     let config = Config::load(path)?;
+    // the service reads these at start; fail here instead, without showing them
+    for d in &config.devices {
+        kmb_sync::device::Secrets::load(d).with_context(|| format!("device {:?}", d.name))?;
+    }
+    if let Some(e) = &config.envis {
+        read_secret(&e.password_file).context("envis.password_file")?;
+    }
+    let service = &config.service;
+    for file in [&service.api_token_file, &service.status_api_token_file]
+        .into_iter()
+        .flatten()
+    {
+        kmb_sync::config::read_token(file)?;
+    }
     let mut out = std::io::stdout().lock();
     writeln!(out, "database {}", config.service.database.display())?;
     match config.service.listen {
@@ -232,6 +244,10 @@ fn check(path: &std::path::Path) -> Result<()> {
     }
     for f in kmb_sync::config::forecast(&config) {
         writeln!(out, "{}", forecast_text(&f))?;
+    }
+    writeln!(out, "secret files readable")?;
+    for w in config.warnings() {
+        writeln!(out, "warning: {w}")?;
     }
     Ok(())
 }

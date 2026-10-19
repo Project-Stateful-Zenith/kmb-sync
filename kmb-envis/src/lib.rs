@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 pub mod append;
 pub mod config;
 pub mod db;
