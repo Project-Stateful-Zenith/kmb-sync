@@ -50,6 +50,9 @@ fn minute(i: u64) -> u64 {
 struct Meter {
     records: Vec<Vec<u8>>,
     requests: Vec<u8>,
+    // the next `short_reads` record reads stop before slot `short_from`
+    short_from: usize,
+    short_reads: usize,
 }
 
 impl Meter {
@@ -83,7 +86,13 @@ impl Meter {
                 let mut p = vec![req.payload[0], 0, 0, 0, 0, 0, 0];
                 p.extend(1000u32.to_be_bytes());
                 p.extend(i32::try_from(n).unwrap().to_be_bytes());
-                for r in self.records.iter().skip(start).take(count) {
+                let end = if count > 0 && self.short_reads > 0 {
+                    self.short_reads = self.short_reads.saturating_sub(1);
+                    self.short_from
+                } else {
+                    n
+                };
+                for r in self.records[..end].iter().skip(start).take(count) {
                     p.extend(r);
                 }
                 data(p)
@@ -265,6 +274,31 @@ async fn damaged_records_are_recorded_not_stored() {
         .unwrap();
     assert_eq!(states[0].reason, "sum");
     assert_eq!((states[0].slot_from, states[0].slot_to), (1, 1));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn slots_the_meter_left_out_are_read_again_not_skipped() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    {
+        let mut m = meter.lock().unwrap();
+        m.records = (0..6).map(|i| record(minute(i), 1.0)).collect();
+        // enough short replies that kmb-tokio's own follow-ups give up
+        (m.short_from, m.short_reads) = (2, 10);
+    }
+    let port = start_meter(meter.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let service = Service::new(config(&dir.path().join("t.db"), port, "")).unwrap();
+    let s = run(&service, "m-archive-1").await;
+    assert_eq!((s.inserted, s.rejected), (6, 0), "{s:?}");
+
+    // slots that never come are recorded as missing after a few tries
+    {
+        let mut m = meter.lock().unwrap();
+        m.records.extend((6..10).map(|i| record(minute(i), 1.0)));
+        (m.short_from, m.short_reads) = (8, usize::MAX);
+    }
+    let s = run(&service, "m-archive-1").await;
+    assert_eq!((s.inserted, s.rejected), (2, 2), "{s:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

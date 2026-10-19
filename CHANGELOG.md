@@ -7,6 +7,17 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5] - 2026-10-19
+
+### `kmb-sync`
+
+- Fixed: an archive without a stored ENVIS definition no longer drops the
+  database connection, which made every later archive of the run fail.
+  Only SQL errors drop it now.
+- Fixed: slots the meter leaves out of a reply are read again instead of
+  being skipped for good. After two tries without progress they are logged
+  as missing, as before.
+
 ## [1.1.4] - 2026-10-16
 
 ### `kmb-sync`
@@ -41,5 +52,6 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.1.5]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.1.5
 [1.1.4]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.1.4
 [1.1.3]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.1.3
