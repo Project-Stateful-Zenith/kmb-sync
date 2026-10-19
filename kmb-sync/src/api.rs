@@ -379,19 +379,24 @@ pub fn decode_rows(
     records: Vec<kmb_store::StoredRecord>,
     raw: bool,
 ) -> kmb_store::Result<Vec<RecordRow>> {
-    let mut defs: HashMap<i64, Definition> = HashMap::new();
+    let mut decoders = HashMap::new();
     let mut rows = Vec::with_capacity(records.len());
     for r in records {
-        let def = match defs.entry(r.definition) {
+        let decoder = match decoders.entry(r.definition) {
             std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             std::collections::hash_map::Entry::Vacant(e) => {
-                e.insert(store.load_definition(r.definition)?)
+                let def: Definition = store.load_definition(r.definition)?;
+                e.insert(def.layout().map(|l| (l, def.description())))
             }
         };
-        let fields = def.decode(&r.bytes).map_or_else(
-            |e| json!({ "error": e.to_string() }),
-            |f| serde_json::to_value(f).unwrap_or(Value::Null),
-        );
+        let fields = match decoder {
+            Ok((layout, desc)) => kmb_store::definition::decode_with(layout, desc, &r.bytes)
+                .map_or_else(
+                    |e| json!({ "error": e.to_string() }),
+                    |f| serde_json::to_value(f).unwrap_or(Value::Null),
+                ),
+            Err(e) => json!({ "error": e.to_string() }),
+        };
         rows.push(RecordRow {
             time: clock::kmb_rfc3339(KmbTime(r.time)),
             time_kmb: r.time,

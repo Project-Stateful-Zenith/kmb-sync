@@ -367,6 +367,35 @@ fn run_log_catches_up_after_a_long_stop() {
 }
 
 #[test]
+fn rotation_also_prunes_values_and_download_states() {
+    const DAY: i64 = 86_400_000;
+    let now = 1_800_000_000_000; // Unix ms, 2027
+    let mut s = Store::open_in_memory().unwrap();
+    let (m, def) = setup(&mut s);
+    s.begin_run("j", "d", now - 3 * DAY).unwrap();
+    s.rotate_runs(now - 3 * DAY, DAY).unwrap();
+    let kmb = |ms: i64| kmb::KmbTime::from_unix_ms(ms).0;
+    for (at, time) in [(now - 3 * DAY, kmb(now - 3 * DAY)), (now, kmb(now))] {
+        s.store_values(m, time, &serde_json::json!({})).unwrap();
+        let batch = Batch {
+            measurement: m,
+            archive: 0,
+            definition: def,
+            records: Vec::new(),
+            rejected: vec![Rejected {
+                slot: 1,
+                reason: "sum".into(),
+            }],
+            run: None,
+        };
+        s.ingest(&batch, at).unwrap();
+    }
+    s.rotate_runs(now, DAY).unwrap();
+    assert_eq!(s.latest_values(m, 10).unwrap().len(), 1);
+    assert_eq!(s.download_states(m, 0, 10).unwrap().len(), 1);
+}
+
+#[test]
 fn run_log_starts_now_without_runs() {
     let mut s = Store::open_in_memory().unwrap();
     assert_eq!(s.rotate_runs(5000, 1000).unwrap().start, 5000);

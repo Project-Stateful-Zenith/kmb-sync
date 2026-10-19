@@ -1076,7 +1076,7 @@ dependencies = [
 
 [[package]]
 name = "kmb-envis"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "jiff",
  "kmb",
@@ -1091,7 +1091,7 @@ dependencies = [
 
 [[package]]
 name = "kmb-store"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "crc32fast",
  "kmb",
@@ -1105,7 +1105,7 @@ dependencies = [
 
 [[package]]
 name = "kmb-sync"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1119,6 +1119,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tiberius",
  "time",
  "tokio",
  "tokio-rustls",

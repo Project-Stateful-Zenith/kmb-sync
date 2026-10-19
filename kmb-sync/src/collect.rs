@@ -1,8 +1,6 @@
 use crate::clock;
 use crate::config::{self, Job, StartFrom, Task};
-use crate::device::{
-    Described, DeviceSlot, IdentitySummary, MeterClient, Traffic, definition, identity_info,
-};
+use crate::device::{Described, DeviceSlot, IdentitySummary, MeterClient, Traffic, identity_info};
 use crate::store::StoreHandle;
 use anyhow::{Context, Result, anyhow, bail};
 use kmb::KmbTime;
@@ -375,17 +373,29 @@ async fn envis_run<'s>(
     described: &mut Described,
 ) -> Result<EnvisRun<'s>> {
     let (object, meas_name) = crate::envis::notebook(client, cx.device.config.address).await?;
-    client
-        .read_values(kmb::uni::DataSet::Config, &mut described.config)
-        .await
-        .context("reading Config values")?;
+    let cfg_time = |d: &Description| {
+        d.value("Message", "CfgSetTime")
+            .and_then(kmb::uni::Value::as_u64)
+    };
+    let before = cfg_time(&described.config);
+    let read = client
+        .read_values(DataSet::Config, &mut described.config)
+        .await;
+    // a reconfigured meter may have new archive layouts: describe it again
+    if read.is_err() || cfg_time(&described.config) != before {
+        described.config = client
+            .read_description(DataSet::Config)
+            .await
+            .context("reading Config")?;
+        described.archives = None;
+        described.layouts.clear();
+        described.sets.clear();
+        described.at = Instant::now();
+    }
     let archives = archive_descriptors(client, described).await?;
     let row = crate::envis::identity_row(id, archives);
     let url = cx.device.config.envis_url();
-    let config_time = described
-        .config
-        .value("Message", "CfgSetTime")
-        .and_then(kmb::uni::Value::as_u64);
+    let config_time = cfg_time(&described.config);
     let blobs = config_time.map(|t| {
         (
             t,
@@ -394,7 +404,7 @@ async fn envis_run<'s>(
         )
     });
     let mut conn = slot.acquire().await?;
-    let db = conn.db()?;
+    let db = conn.db().await?;
     let stored = async {
         let m = db.measurement(&object, &meas_name, &row, &url).await?;
         if let Some((t, desc, data)) = &blobs {
@@ -482,7 +492,7 @@ async fn layout(
     let (version, max_size) = described.header(desc);
     let layout = Layout::new(desc, archive, version, max_size)
         .map_err(|e| anyhow!("no usable layout: {e}"))?;
-    let def = definition(&layout, desc);
+    let def = kmb_store::Definition::from_layout(&layout, desc);
     let id = cx.store.call(move |s| s.definition(&def)).await?;
     described.layouts.insert(archive, (layout.clone(), id));
     Ok((layout, id))
@@ -753,6 +763,8 @@ async fn sync_archive(
                 let report = sink.store(cx, archive, records, rejected).await?;
                 *newest = (*newest).max(top);
                 out.add(report);
+                let (run, bytes) = (cx.run, cx.traffic.get());
+                cx.store.call(move |s| s.run_traffic(run, bytes)).await?;
             }
         }
         Ok(())
@@ -783,7 +795,7 @@ async fn envis_sink<'s>(
         kmb_envis::definition::TypeDescription::from_descriptors(desc, layout.group.idx)?;
     let row_len = layout.record_len.saturating_sub(remove);
     let (slot, meas) = (run.slot, run.meas);
-    let db = run.conn.db()?;
+    let db = run.conn.db().await?;
     let def = db
         .definition_for(meas, archive, &fields, slot.allow_new)
         .await?;
@@ -833,7 +845,7 @@ async fn feeder_sink<'s>(
         });
     let (slot, main) = (run.slot, run.meas);
     let (object, url) = (run.object.clone(), run.url.clone());
-    let db = run.conn.db()?;
+    let db = run.conn.db().await?;
     let mut outputs = Vec::new();
     let mut resume: Option<u64> = None;
     let mut any_empty = false;

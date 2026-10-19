@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 pub mod definition;
 
 pub use definition::{DecodedField, Definition, DefinitionError};
@@ -344,13 +342,6 @@ impl Store {
             found => return Err(Error::UnknownSchema { found }),
         }
         Ok(Self { conn })
-    }
-
-    pub fn object(&mut self, path: &[String]) -> Result<ObjectId> {
-        let tx = self.conn.transaction()?;
-        let id = object_in(&tx, path)?;
-        tx.commit()?;
-        Ok(id)
     }
 
     pub fn upsert_identity(
@@ -731,6 +722,26 @@ impl Store {
         Ok(())
     }
 
+    /// Records the bytes a run has used so far, so they survive a crash.
+    pub fn run_traffic(&mut self, run: i64, traffic: Traffic) -> Result<()> {
+        self.conn.execute(
+            "UPDATE run SET bytes_rx = ?2, bytes_tx = ?3 WHERE id = ?1",
+            params![run, sql_time(traffic.rx), sql_time(traffic.tx)],
+        )?;
+        Ok(())
+    }
+
+    /// Bytes used by the runs of `job` that started after `since`.
+    pub fn job_bytes_since(&self, job: &str, since: i64) -> Result<u64> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(bytes_rx + bytes_tx), 0) FROM run
+             WHERE job = ?1 AND started_at > ?2",
+            params![job, since],
+            |r| r.get(0),
+        )?;
+        Ok(from_sql(n))
+    }
+
     pub fn add_run_counts(&mut self, run: i64, report: &IngestReport) -> Result<()> {
         self.conn.execute(
             "UPDATE run SET inserted = inserted + ?2, duplicates = duplicates + ?3,
@@ -838,9 +849,9 @@ impl Store {
 
     /// Rotates the run log in periods of `period` milliseconds, keeping the
     /// current and the previous period. The first period starts at the
-    /// oldest run, or at `now` when there is none. When a period ends, runs
-    /// from before the previous period are deleted. A `period` below 1 is
-    /// taken as 1.
+    /// oldest run, or at `now` when there is none. When a period ends, runs,
+    /// download states and actual values from before the previous period are
+    /// deleted. A `period` below 1 is taken as 1.
     pub fn rotate_runs(&mut self, now: i64, period: i64) -> Result<RunLogPeriod> {
         let period = period.max(1);
         let tx = self.conn.transaction()?;
@@ -858,9 +869,12 @@ impl Store {
         let ended = now.saturating_sub(start).checked_div(period).unwrap_or(0);
         let (start, deleted) = if ended > 0 {
             let start = start.saturating_add(ended.saturating_mul(period));
-            let deleted = tx.execute(
-                "DELETE FROM run WHERE started_at < ?1",
-                params![start.saturating_sub(period)],
+            let cut = start.saturating_sub(period);
+            let deleted = tx.execute("DELETE FROM run WHERE started_at < ?1", [cut])?;
+            tx.execute("DELETE FROM download_state WHERE at < ?1", [cut])?;
+            tx.execute(
+                "DELETE FROM actual_values WHERE time < ?1",
+                [sql_time(kmb::KmbTime::from_unix_ms(cut).0)],
             )?;
             (start, deleted)
         } else {

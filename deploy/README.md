@@ -34,7 +34,10 @@ kmb-sync check -c /etc/kmb-sync/config.toml
 `kmb-sync check` validates the file without contacting any meter and prints
 what it understood: every device and job, and per meter how much of the
 time its jobs may hold the link and how many archive bytes per day the
-limits allow. Fix what it reports before starting the service.
+limits allow. It also reads every secret file (without printing them) and
+ends with warnings for settings that work but are likely not meant. Run it
+as the service user, so that file permissions are checked too. Fix what it
+reports before starting the service; the service logs the same warnings.
 
 [`kmb-sync.service`](kmb-sync.service) is a hardened systemd unit that runs
 `kmb-sync serve --config /etc/kmb-sync/config.toml` as user `kmb-sync`, with
@@ -74,7 +77,7 @@ them readable by the service user only.
 | `max_concurrency` | `4` | jobs that may run at the same time, across all meters. Jobs of one meter never run at the same time |
 | `heartbeat` | `"5m"` | how often the service records that it is alive; after a restart it reports how long it was down |
 | `describe_every` | `"6h"` | how often a meter's self-description (its archives and fields) is read again, besides when its identity changes |
-| `run_log_rotate` | off | rotate the run log in periods of this length (at least `"1d"`, e.g. `"365d"`), keeping the current and the previous period. When a period ends, runs from before the previous period are deleted. Off, runs are kept forever |
+| `run_log_rotate` | off | rotate the run log in periods of this length (at least `"1d"`, e.g. `"365d"`), keeping the current and the previous period. When a period ends, runs, download states and stored values from before the previous period are deleted. Off, they are kept forever |
 
 The status page itself never needs a token: it is read only and shows no
 secrets. Put it behind a firewall or reverse proxy if the station list
@@ -114,7 +117,7 @@ Settings every job has:
 | `name` | `<device>-<kind>-<n>` | unique name, used by `kmb-sync run`, `pause`, `resume` and in the run log |
 | `every` | `"1m"` | how often the job runs |
 | `anchor` | none | align runs to this time plus multiples of `every`, e.g. on the quarter hour |
-| `start_time` | none | align runs to this local time of day (instead of `anchor`, with `every` of at most `24h`); the zone is `[envis].time_zone` or the host's |
+| `start_time` | none | align runs to this local time of day (instead of `anchor`, with `every` of at most `24h`); the zone is `[envis].time_zone` or the host's. Use an `every` that divides 24h, or runs around midnight are unevenly spaced (`check` warns) |
 | `timeout` | `"10m"` | maximum time of one run. It counts only while the run holds the meter, so jobs waiting for the same meter do not use up their time |
 | `enabled` | `true` | `false` keeps the job configured but never runs it |
 | `measurement` | `"default"` | name of the measurement the records are stored under, when one meter feeds several |
@@ -131,7 +134,7 @@ already stored, so only new records cross the link.
 | --- | --- | --- |
 | `archives` | required | `"all"` (every archive the meter offers), or a list of names or numbers |
 | `start_from` | `"all"` | for the first download: `"all"` takes everything the meter still holds; a time takes only records from then on |
-| `max_size` | no limit | byte budget per `every` period, retries and manual runs included. A run that reaches it ends as "limited", and the rest follows next period |
+| `max_size` | no limit | byte budget per `every` period, retries and manual runs included. A run that reaches it ends as "limited", and the rest follows next period. Bytes are recorded while a run goes on, so a restart does not give a job without `anchor` or `start_time` a fresh budget |
 | `max_mib` | no limit | the same budget in MiB; set `max_size` or `max_mib`, not both |
 
 Archive names (case does not matter): `Main` (0), `SProfile` (1),

@@ -68,6 +68,9 @@ pub struct Service {
     pub describe_every: Duration,
     #[serde(default, with = "humantime_serde::option")]
     pub run_log_rotate: Option<Duration>,
+    /// Whether the file sets `status_listen`; filled in by [`Config::load`].
+    #[serde(skip)]
+    pub status_listen_set: bool,
 }
 
 /// Shortest `run_log_rotate` accepted.
@@ -421,6 +424,11 @@ impl Config {
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let mut c: Self =
             toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        c.service.status_listen_set = text
+            .parse::<toml::Table>()
+            .ok()
+            .and_then(|t| t.get("service")?.get("status_listen").cloned())
+            .is_some();
         c.check()?;
         Ok(c)
     }
@@ -548,6 +556,32 @@ impl Config {
             }
         }
         Ok(())
+    }
+
+    /// Settings that work but are likely not what was meant.
+    #[must_use]
+    pub fn warnings(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(addr) = self.service.status_listen
+            && !self.service.status_listen_set
+            && !addr.ip().is_loopback()
+        {
+            out.push(format!(
+                "the status page listens on {addr} by default, open to the network without \
+                 a password; set service.status_listen to choose"
+            ));
+        }
+        for j in &self.jobs {
+            if j.start_time.is_some() && !86_400_000_u128.is_multiple_of(j.every.as_millis().max(1))
+            {
+                out.push(format!(
+                    "job {:?}: every does not divide 24h, so runs after start_time are not \
+                     evenly spaced across midnight",
+                    j.name
+                ));
+            }
+        }
+        out
     }
 
     #[must_use]
@@ -884,6 +918,36 @@ every = "1h"
             "letters, digits",
         );
         fails("name = \"clock\"", "name = \"clock&x\"", "letters, digits");
+    }
+
+    #[test]
+    fn warnings() {
+        let mut c: Config = toml::from_str(EXAMPLE).unwrap();
+        c.check().unwrap();
+        assert!(
+            c.warnings()[0].contains("open to the network"),
+            "{:?}",
+            c.warnings()
+        );
+        c.service.status_listen_set = true;
+        assert_eq!(c.warnings(), Vec::<String>::new());
+        let odd = EXAMPLE.replace("every = \"1h\"", "every = \"7h\"\nstart_time = \"10:00\"");
+        let mut c: Config = toml::from_str(&odd).unwrap();
+        c.check().unwrap();
+        c.service.status_listen_set = true;
+        assert!(
+            c.warnings()[0].contains("does not divide 24h"),
+            "{:?}",
+            c.warnings()
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("c.toml");
+        std::fs::write(
+            &file,
+            EXAMPLE.replace("[[device]]", "status_listen = \"off\"\n\n[[device]]"),
+        )
+        .unwrap();
+        assert!(Config::load(&file).unwrap().service.status_listen_set);
     }
 
     #[test]
