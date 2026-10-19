@@ -12,13 +12,13 @@ kmb.workspace = true
 thiserror = "2.0.21"
 tiberius = { version = "0.13.0", default-features = false, features = ["tds73", "rustls", "time"] }
 time = "0.3.55"
-tokio = { version = "1.53.2", features = ["net"] }
+tokio = { version = "1.53.2", features = ["net", "time"] }
 tokio-util = { version = "0.7.20", features = ["compat"] }
 
 [dev-dependencies]
 serde_json = "1.0.154"
 kmb-tokio.workspace = true
-tokio = { version = "1.53.2", features = ["rt", "macros", "net", "rt-multi-thread"] }
+tokio = { version = "1.53.2", features = ["rt", "macros", "net", "rt-multi-thread", "test-util"] }
 
 [lints]
 workspace = true
