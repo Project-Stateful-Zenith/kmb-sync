@@ -16,6 +16,7 @@ use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 pub const BATCHES_PER_COMMIT: u32 = 8;
+pub const MISSING_RETRIES: u32 = 2;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Summary {
@@ -281,8 +282,7 @@ async fn archive_job(
             .update(|s| s.archive_synced(archive, inserted, newest, error));
         if let Err(e) = r {
             if let Some(run) = envis.as_mut()
-                && e.chain()
-                    .any(|c| c.downcast_ref::<kmb_envis::Error>().is_some())
+                && connection_broken(&e)
             {
                 run.conn.mark_broken();
             }
@@ -299,6 +299,17 @@ async fn archive_job(
         run.conn.release();
     }
     Ok(out)
+}
+
+// only SQL errors can leave the connection mid-transaction; the other ENVIS
+// errors (no definition, row length, time) happen before SQL or after a rollback
+fn connection_broken(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        matches!(
+            c.downcast_ref::<kmb_envis::Error>(),
+            Some(kmb_envis::Error::Sql(_))
+        )
+    })
 }
 
 fn resume_order(mut list: Vec<u8>, after: Option<u8>) -> Vec<u8> {
@@ -624,6 +635,39 @@ fn sort_out(
     (records, rejected)
 }
 
+/// Drops what was read from the first slot the meter left out, so that slot is
+/// read again instead of the cursor moving past it, and returns the slot to
+/// continue from. After `MISSING_RETRIES` tries without progress the slot is
+/// kept as missing and skipped.
+fn hold_back_missing(
+    part: &Range<u32>,
+    records: &mut Vec<NewRecord>,
+    rejected: &mut Vec<Rejected>,
+    retries: &mut u32,
+) -> u32 {
+    let missing = rejected
+        .iter()
+        .filter(|r| r.reason == "missing")
+        .map(|r| r.slot)
+        .min();
+    match missing {
+        Some(m) if *retries < MISSING_RETRIES => {
+            *retries = if m > part.start {
+                0
+            } else {
+                retries.saturating_add(1)
+            };
+            records.retain(|r| r.slot < m);
+            rejected.retain(|r| r.slot < m);
+            m
+        }
+        _ => {
+            *retries = 0;
+            part.end
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn sync_archive(
     cx: &RunContext<'_>,
@@ -668,6 +712,7 @@ async fn sync_archive(
     let record_len = u64::try_from(layout.record_len).unwrap_or(u64::MAX).max(1);
     let mut read = Vec::new();
     let mut older = 0usize;
+    let mut retries = 0u32;
     let result = async {
         for run in runs {
             let mut rest = run;
@@ -698,9 +743,12 @@ async fn sync_archive(
                     .read_records(&layout, part.clone(), geometry)
                     .await
                     .with_context(|| format!("reading slots {}..{}", part.start, part.end))?;
-                push_range(&mut read, part.clone());
-                let (records, rejected) =
-                    sort_out(&layout, got, part, keep_from, cursor, &mut older);
+                let (mut records, mut rejected) =
+                    sort_out(&layout, got, part.clone(), keep_from, cursor, &mut older);
+                rest.start = hold_back_missing(&part, &mut records, &mut rejected, &mut retries);
+                if part.start < rest.start {
+                    push_range(&mut read, part.start..rest.start);
+                }
                 let top = records.iter().map(|r| r.time).max();
                 let report = sink.store(cx, archive, records, rejected).await?;
                 *newest = (*newest).max(top);
@@ -1165,6 +1213,15 @@ mod tests {
         assert_eq!(resume_order(list.clone(), Some(25)), [6, 3, 4, 0, 25]);
         assert_eq!(resume_order(list.clone(), Some(4)), list);
         assert_eq!(resume_order(list.clone(), Some(9)), list);
+    }
+
+    #[test]
+    fn only_sql_errors_drop_the_envis_connection() {
+        let sql = anyhow::Error::from(kmb_envis::Error::Sql("timeout".into()));
+        assert!(connection_broken(&sql.context("archive 0")));
+        let none = anyhow::Error::from(kmb_envis::Error::NoDefinition(3));
+        assert!(!connection_broken(&none));
+        assert!(!connection_broken(&anyhow!("meter did not answer")));
     }
 
     #[test]
