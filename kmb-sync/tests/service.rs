@@ -367,7 +367,10 @@ async fn an_adjusted_clock_shows_no_offset() {
     let cfg = config(&dir.path().join("t.db"), port, "adjust_above = \"1s\"");
     let service = Service::new(cfg).unwrap();
     let c = run(&service, "m-clock-1").await;
-    assert!(c.notes.iter().any(|n| n.starts_with("clock set to")), "{c:?}");
+    assert!(
+        c.notes.iter().any(|n| n.starts_with("clock set to")),
+        "{c:?}"
+    );
     assert!(meter.lock().unwrap().requests.contains(&18));
     assert_eq!(service.devices["m"].snapshot().clock_offset_ms, Some(0));
 }
@@ -645,7 +648,7 @@ async fn startup_survey_reads_identity_and_archives() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn meter_clock_going_back_is_an_error_not_a_silent_skip() {
+async fn records_after_a_meter_clock_step_back_are_kept() {
     let meter = Arc::new(Mutex::new(Meter::default()));
     meter.lock().unwrap().records = (0..3).map(|i| record(minute(i), 230.0)).collect();
     let port = start_meter(meter.clone()).await;
@@ -658,12 +661,16 @@ async fn meter_clock_going_back_is_an_error_not_a_silent_skip() {
         .unwrap()
         .records
         .push(record(minute(1) + 30_000, 231.0));
-    let slot = service.job("m-archive-1").unwrap().clone();
-    let (_, outcome) = service.run_once(&slot).await.unwrap();
-    let Outcome::Failed(e) = outcome else {
-        panic!("{outcome:?}");
-    };
-    assert!(e.contains("did the meter clock go back"), "{e}");
+    let s = run(&service, "m-archive-1").await;
+    assert_eq!(s.inserted, 1, "{s:?}");
+    assert!(
+        s.notes.iter().any(|n| n.contains("clock step back")),
+        "{s:?}"
+    );
+
+    meter.lock().unwrap().records.push(record(minute(3), 232.0));
+    assert_eq!(run(&service, "m-archive-1").await.inserted, 1);
+    assert_eq!(run(&service, "m-archive-1").await.inserted, 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]

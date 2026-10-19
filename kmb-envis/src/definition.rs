@@ -64,6 +64,8 @@ pub enum Error {
     NoGroup(u8),
     #[error("stored TypeXML is not understood: {0}")]
     Xml(&'static str),
+    #[error("archive field {0:?} has no ENVIS type; the values after it would be misplaced")]
+    Field(String),
 }
 
 fn net_type(f: &ArchiveField) -> Option<(&'static str, usize)> {
@@ -200,6 +202,13 @@ impl TypeDescription {
             return Err(Error::NoGroup(ic));
         }
         let (with_fields, _) = Self::props_with_fields(desc, ic);
+        let skipped =
+            desc.fields.iter().enumerate().find(|(i, f)| {
+                f.ic == ic && f.zapis != 0 && !with_fields.iter().any(|(_, j)| j == i)
+            });
+        if let Some((_, f)) = skipped {
+            return Err(Error::Field(f.name.clone()));
+        }
         let mut props: Vec<Prop> = with_fields.into_iter().map(|(p, _)| p).collect();
         let header = HEADERS
             .iter()
@@ -261,10 +270,17 @@ impl TypeDescription {
                 p.info,
                 p.info2,
                 p.data_type,
+                p.unit.clone().unwrap_or_default(),
             )
         };
+        // relative, as ENVIS may have written mul with fewer digits than ours
+        let same_mul = |a: f32, b: f32| (a - b).abs() <= a.abs().max(b.abs()) * 1e-6;
         self.props.len() == other.props.len()
-            && self.props.iter().map(key).eq(other.props.iter().map(key))
+            && self
+                .props
+                .iter()
+                .zip(&other.props)
+                .all(|(a, b)| key(a) == key(b) && same_mul(a.mul, b.mul))
     }
 
     #[must_use]
@@ -612,7 +628,6 @@ mod tests {
         d.fields.push(field("{fi}1", 1, 4, 4, 0));
         d.fields.push(field("[x", 1, 4, 4, 0));
         d.fields.push(field("U1", 1, 4, 4, 1));
-        d.fields.push(field("Neg", 1, 16, 2, 0));
         let (t, _) = TypeDescription::from_descriptors(&d, 6).unwrap();
         let names: Vec<&str> = t.props.iter().map(|p| p.prop_name.as_str()).collect();
         assert_eq!(
@@ -626,6 +641,30 @@ mod tests {
             Some("1-25;27".into())
         );
         assert_eq!(array_indexes(&[0]), None);
+    }
+
+    #[test]
+    fn a_recorded_field_without_a_type_is_refused() {
+        let mut d = example();
+        d.fields.push(field("Neg", 1, 16, 2, 0));
+        assert_eq!(
+            TypeDescription::from_descriptors(&d, 6),
+            Err(Error::Field("Neg".into()))
+        );
+    }
+
+    #[test]
+    fn same_layout_needs_the_same_unit_and_scale() {
+        let (t, _) = TypeDescription::from_descriptors(&example(), 6).unwrap();
+        let with = |f: fn(&mut Prop)| {
+            let mut o = t.clone();
+            f(&mut o.props[0]);
+            t.same_layout(&o)
+        };
+        assert!(with(|p| p.group = Some("Volt".into())));
+        assert!(with(|p| p.mul *= 1.000_000_1));
+        assert!(!with(|p| p.mul *= 1000.0));
+        assert!(!with(|p| p.unit = Some("kV".into())));
     }
 
     #[test]

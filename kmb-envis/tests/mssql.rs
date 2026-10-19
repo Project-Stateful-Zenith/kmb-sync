@@ -311,6 +311,9 @@ async fn definitions_are_reused_by_layout() {
         db.definition_for(m.id, 0, &renamed, false).await.unwrap(),
         id
     );
+    let mut scaled = ours.clone();
+    scaled.props[0].mul = 0.001;
+    assert!(db.definition_for(m.id, 0, &scaled, false).await.is_err());
     drop(db);
     let mut c = raw(&s, &tdb.name).await;
     let r = c

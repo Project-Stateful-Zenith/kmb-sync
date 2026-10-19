@@ -7,6 +7,29 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-10-19
+
+### `kmb-sync`
+
+- Fixed: after the meter clock stepped back, the first record written
+  after the cursor's slot was skipped for good once a newer record came.
+  The run now goes on from the cursor's slot, stores those records and
+  notes the step back, instead of failing until the meter's time passes
+  the stored one. Local SQLite only; the ENVIS path keeps the old check.
+
+### `kmb-envis`
+
+- Fixed: a recorded field without an ENVIS type (signed arrays, unknown
+  type codes) was left out of the definition while its bytes stayed in
+  the row, so every value after it was read from the wrong place. Such an
+  archive is now refused with the field's name.
+- Fixed: a stored definition was reused for a layout with another unit
+  or scale factor (`mul`), so values could show 1000 times off. A
+  different scale or unit now needs its own definition, which with
+  `allow_new_definitions = false` stops that archive with "no definition".
+- Fixed: the version check read an arbitrary row of
+  `dbo.ENVDBUpdates`; it now reads the newest.
+
 ## [1.3.0] - 2026-10-19
 
 ### `kmb-sync`
@@ -93,6 +116,7 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.3.1]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.1
 [1.3.0]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.0
 [1.2.1]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.2.1
 [1.2.0]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.2.0

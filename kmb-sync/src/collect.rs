@@ -502,6 +502,7 @@ async fn plan(
     client: &mut MeterClient,
     archive: u8,
     cursor: Option<u64>,
+    last_slot: Option<u32>,
     start_from: StartFrom,
     notes: &mut Vec<String>,
 ) -> Result<(Vec<Range<u32>>, Option<u64>)> {
@@ -521,7 +522,13 @@ async fn plan(
         .record_at_time(archive, from)
         .await
         .context("record lookup")?;
-    if let Some(slot) = at.slot {
+    // older than the cursor: the meter clock stepped back and the slot found by
+    // time is one written after the cursor's, so go on from the cursor's slot
+    let slot = match last_slot {
+        Some(s) if at.slot.is_some() && at.time < from => Some(s),
+        _ => at.slot,
+    };
+    if let Some(slot) = slot {
         let mut runs = ring.runs_from(slot);
         if !runs.is_empty() {
             if cursor.is_some() {
@@ -691,19 +698,20 @@ async fn sync_archive(
     newest: &mut Option<u64>,
 ) -> Result<()> {
     let (layout, definition) = layout(cx, client, described, archive).await?;
+    let mut last_slot = None;
     let (mut sink, cursor) = match envis {
         None => {
-            let cursor = cx
+            let stored = cx
                 .store
                 .call(move |s| s.cursor(measurement, archive))
-                .await?
-                .map(|c| c.last_time);
+                .await?;
+            last_slot = stored.as_ref().map(|c| c.last_slot);
             (
                 Sink::Local {
                     measurement,
                     definition,
                 },
-                cursor,
+                stored.map(|c| c.last_time),
             )
         }
         Some(run) if layout.group.name == "LB" => feeder_sink(run, described, &layout).await?,
@@ -716,7 +724,15 @@ async fn sync_archive(
         Some(run) => envis_sink(run, described, &layout, archive).await?,
     };
     *newest = cursor;
-    let (runs, keep_from) = plan(client, archive, cursor, start_from, &mut out.notes).await?;
+    let (runs, keep_from) = plan(
+        client,
+        archive,
+        cursor,
+        last_slot,
+        start_from,
+        &mut out.notes,
+    )
+    .await?;
     let geometry = client.geometry(&described.config, &layout);
     let per_request = u32::from(geometry.per_frame).saturating_mul(u32::from(geometry.frames));
     let record_len = u64::try_from(layout.record_len).unwrap_or(u64::MAX).max(1);

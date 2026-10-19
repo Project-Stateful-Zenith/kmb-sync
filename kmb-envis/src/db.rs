@@ -105,7 +105,10 @@ impl Envis {
     async fn check_version(&mut self) -> Result<()> {
         let rows = self
             .client
-            .simple_query("SELECT TOP 1 Major, Minor, Build, Revision FROM dbo.ENVDBUpdates")
+            .simple_query(
+                "SELECT TOP 1 Major, Minor, Build, Revision FROM dbo.ENVDBUpdates \
+                 ORDER BY Major DESC, Minor DESC, Build DESC, Revision DESC",
+            )
             .await
             .map_err(sql_err)?
             .into_first_result()
