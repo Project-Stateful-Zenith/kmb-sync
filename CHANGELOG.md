@@ -7,6 +7,16 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-10-19
+
+### `kmb-envis`
+
+- Fixed: opening the TCP connection to the database had no time limit.
+  When the host dropped packets, each connect waited about 2 minutes for
+  the operating system to give up, and since 1.2.0 that could happen once
+  per archive, holding the meter link meanwhile. It now gives up after
+  15 s; the SQL login after it already had a 15 s limit.
+
 ## [1.2.0] - 2026-10-19
 
 ### `kmb-sync`
@@ -74,6 +84,7 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.2.1]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.2.1
 [1.2.0]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.2.0
 [1.1.4]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.1.4
 [1.1.3]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.1.3

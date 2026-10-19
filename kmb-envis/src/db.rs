@@ -8,6 +8,11 @@ pub const MIN_DB_VERSION: (i32, i32, i32, i32) = (1, 2, 0, 14_671);
 
 pub const OBJECT_NAME_MAX: usize = 32;
 
+/// Longest wait for the TCP connection. Without it a host that drops packets
+/// keeps a run, and its meter link, waiting for minutes; tiberius bounds the
+/// login after it by itself (15 s).
+pub const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 #[derive(Clone, Debug)]
 pub struct Target {
     pub host: String,
@@ -73,8 +78,14 @@ impl Envis {
             config.trust_cert();
         }
         config.application_name("kmb-sync");
-        let tcp = TcpStream::connect(config.get_addr())
+        let tcp = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(config.get_addr()))
             .await
+            .map_err(|_| {
+                Error::Sql(format!(
+                    "connect to {}:{} timed out after {CONNECT_TIMEOUT:?}",
+                    target.host, target.port
+                ))
+            })?
             .map_err(|e| Error::Sql(format!("connect to {}:{}: {e}", target.host, target.port)))?;
         tcp.set_nodelay(true)
             .map_err(|e| Error::Sql(e.to_string()))?;
@@ -675,6 +686,23 @@ impl Envis {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn a_host_that_drops_packets_times_out() {
+        // 10.255.255.1 is not routed: its SYNs go unanswered, or the network
+        // says unreachable at once; either way no wait of the OS's ~2 min
+        let target = Target {
+            host: "10.255.255.1".into(),
+            port: 1433,
+            database: "x".into(),
+            user: "u".into(),
+            password: "p".into(),
+            trust_cert: true,
+        };
+        let started = std::time::Instant::now();
+        assert!(Box::pin(Envis::connect(&target)).await.is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    }
 
     #[test]
     fn runs_and_times() {
