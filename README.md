@@ -16,6 +16,11 @@ The protocol comes from the `kmb` and `kmb-tokio` crates of
 [zenith-kmb](https://github.com/Project-Stateful-Zenith/zenith-kmb), which
 Cargo fetches from GitHub.
 
+> [!NOTE]
+> This repository is a clone of an internal production repository. It may
+> lag behind the internal one in releases and patches, though we try to
+> patch issues here that we catch internally.
+
 ## Build
 
 ```sh
