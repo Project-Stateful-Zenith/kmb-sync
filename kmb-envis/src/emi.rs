@@ -240,7 +240,7 @@ fn localbus_names(field: &str) -> Option<[Option<String>; 4]> {
 
 #[derive(Clone, Debug, Default)]
 pub struct LbLayout {
-    master: HashMap<String, (usize, usize)>,
+    master: HashMap<String, (usize, usize, u16)>,
     local: HashMap<String, usize>,
     currents: Vec<usize>,
     array_pb: u16,
@@ -283,7 +283,7 @@ impl LbLayout {
                     }
                 }
             } else if let Some(name) = names.get(&i) {
-                out.master.insert(name.clone(), (offset, width));
+                out.master.insert(name.clone(), (offset, width, f.pb));
             }
             offset = offset.saturating_add(width);
         }
@@ -295,9 +295,14 @@ impl LbLayout {
         let energy = props.first().is_some_and(|p| p.prop_name.starts_with("T/"));
         !props.is_empty()
             && energy == (archive == 6)
+            // a definition without any per-feeder prop is not a feeder definition
+            && props.iter().any(|p| self.local.contains_key(&p.prop_name))
             && props.iter().all(|p| match self.local.get(&p.prop_name) {
                 Some(_) => p.len == self.array_pb,
-                None => self.master.contains_key(&p.prop_name),
+                None => self
+                    .master
+                    .get(&p.prop_name)
+                    .is_some_and(|&(_, _, pb)| p.len == pb),
             })
     }
 
@@ -324,7 +329,7 @@ impl LbLayout {
                     record
                         .get(o.saturating_add(shift)..o.saturating_add(shift).saturating_add(4))?,
                 );
-            } else if let Some(&(o, w)) = self.master.get(&p.prop_name) {
+            } else if let Some(&(o, w, _)) = self.master.get(&p.prop_name) {
                 let bytes = record.get(o..o.checked_add(w)?)?;
                 if p.prop_name == "Status_Measurement_Flags" && all_nan {
                     let v = u32::from_be_bytes(bytes.try_into().ok()?) | SLAVE_TIMEOUT;
@@ -428,5 +433,42 @@ mod tests {
             12_345
         );
         assert_eq!(module_identity(&b, true, true), None);
+    }
+
+    fn prop(name: &str, len: u16) -> crate::definition::Prop {
+        crate::definition::Prop {
+            prop_name: name.into(),
+            user_name: name.into(),
+            unit: None,
+            group: None,
+            sub_group: None,
+            data_type: crate::definition::DataType::Value,
+            big_endian: true,
+            mul: 1.0,
+            info: 0,
+            info2: 0,
+            len,
+            type_ser: String::new(),
+            a_ind: None,
+        }
+    }
+
+    #[test]
+    fn fits_needs_feeder_props_and_matching_lengths() {
+        let lb = LbLayout {
+            master: [
+                ("U_avg_U1".to_owned(), (0, 4, 1)),
+                ("Status_Time_TimeNs".to_owned(), (4, 8, 1)),
+            ]
+            .into(),
+            local: [("I_avg_I1".to_owned(), 12)].into(),
+            currents: vec![12],
+            array_pb: 80,
+        };
+        let master_only = [prop("U_avg_U1", 1), prop("Status_Time_TimeNs", 1)];
+        assert!(!lb.fits(0, &master_only));
+        assert!(lb.fits(0, &[prop("U_avg_U1", 1), prop("I_avg_I1", 80)]));
+        assert!(!lb.fits(0, &[prop("U_avg_U1", 1), prop("I_avg_I1", 64)]));
+        assert!(!lb.fits(0, &[prop("U_avg_U1", 2), prop("I_avg_I1", 80)]));
     }
 }

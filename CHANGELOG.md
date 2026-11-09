@@ -7,6 +7,24 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-11-09
+
+### `kmb-envis`
+
+- Fixed: when all feeders of a UMD-98LB were new to ENVIS (for example
+  after an MMI module was added and the feeders were renumbered), the
+  definition fallback could pick a definition without any feeder props,
+  or one with other field lengths. The LB archive then failed with
+  `row of N bytes, the definition has M`, or would have stored master
+  values only. A feeder definition now needs at least one LocalBus prop,
+  and its master props must have the meter's field lengths.
+
+### `kmb-sync`
+
+- Fixed: a feeder row that does not match its definition's length is now
+  reported as "definition does not fit the LB record" and rolled back,
+  instead of a `RowLength` error from the database layer.
+
 ## [1.3.1] - 2026-10-19
 
 ### `kmb-sync`
@@ -116,6 +134,7 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.3.2]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.2
 [1.3.1]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.1
 [1.3.0]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.0
 [1.2.1]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.2.1

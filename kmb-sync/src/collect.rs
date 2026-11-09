@@ -1118,6 +1118,15 @@ async fn store_feeders(
                     o.name
                 );
             };
+            if row.len() != row_len {
+                a.rollback().await?;
+                bail!(
+                    "feeder {}: ENVIS definition {} does not fit the LB record ({} bytes, the definition has {row_len})",
+                    o.name,
+                    o.def,
+                    row.len()
+                );
+            }
             if let Err(e) = a.add(&row).await {
                 a.rollback().await?;
                 return Err(e.into());
