@@ -15,7 +15,7 @@ kmb.workspace = true
 kmb-tokio.workspace = true
 kmb-store.workspace = true
 kmb-envis.workspace = true
-jiff = "0.2.38"
+jiff = "0.2.46"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "io-util"] }
 tokio-util = { version = "0.7.20", features = ["rt"] }
 axum = "0.8.9"
