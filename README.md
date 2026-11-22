@@ -23,6 +23,8 @@ Cargo fetches from GitHub.
 
 ## Build
 
+Needs Rust 1.100 or later (`rustup update stable`).
+
 ```sh
 cargo build --release              # add --features tls for KMB over TLS
 cargo test --workspace
