@@ -594,9 +594,9 @@ impl Config {
                     ));
                 }
             }
-            if d.byte_timeout > kmb_tokio::REPLY_TIMEOUT {
+            if d.byte_timeout >= kmb_tokio::REPLY_TIMEOUT {
                 out.push(format!(
-                    "device {:?}: byte_timeout {:?} is above the {:?} limit for a whole reply \
+                    "device {:?}: byte_timeout {:?} is not below the {:?} limit for a whole reply \
                      frame: a silent meter is only noticed at that limit and lost replies are not \
                      retried",
                     d.name,
@@ -1135,12 +1135,13 @@ every = "1h"
         assert_eq!(
             with_device("byte_timeout = \"90s\"").warnings(),
             [
-                "device \"station-a\": byte_timeout 90s is above the 60s limit for a whole reply \
-                 frame: a silent meter is only noticed at that limit and lost replies are not retried"
+                "device \"station-a\": byte_timeout 90s is not below the 60s limit for a whole \
+                 reply frame: a silent meter is only noticed at that limit and lost replies are not \
+                 retried"
             ]
         );
-        assert!(warned("byte_timeout = \"61s\""));
-        assert!(!warned("byte_timeout = \"60s\""));
+        assert!(warned("byte_timeout = \"60s\""));
+        assert!(!warned("byte_timeout = \"59s\""));
         assert!(!warned(""));
     }
 
