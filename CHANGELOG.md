@@ -7,6 +7,30 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.4] - 2026-11-22
+
+### `kmb-sync`
+
+- The status page shows badges next to each station name. TLS and PSK are
+  green when the link uses TLS or the meter's PSK envelope, red and crossed
+  out when it does not; PSK stays grey until the meter has answered an
+  identify. The clock badge is green when an enabled clock job with
+  `adjust_above` keeps the meter clock set, amber when that job's last run
+  failed, and red and crossed out when there is no such job, it is paused,
+  or it only reads the clock. Hidden clock jobs count too.
+- New option `service.status_badges` picks which badges the page shows,
+  default `["tls", "psk", "clock"]`; `[]` shows none. A name listed twice
+  is refused.
+- New option `show` on `[[device]]` and `[[job]]`, default `true`. With
+  `show = false` the station or job is left off the status page, with its
+  runs and, for an archive job, the archives only it syncs (counted as
+  hidden). It still runs. `/api/stations` still lists it and carries
+  `show` for each station and job; `kmb-sync check` marks it `(hidden)` and
+  prints the badges.
+- `/api/stations` gives each station a `clock` object (`state`,
+  `every_ms`, `adjust_above_ms`).
+- The status page loads the recent runs of shown jobs only.
+
 ## [1.4.3] - 2026-11-22
 
 ### `kmb-sync`
@@ -307,6 +331,7 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.4.4]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.4
 [1.4.3]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.3
 [1.4.2]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.2
 [1.4.1]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.1
