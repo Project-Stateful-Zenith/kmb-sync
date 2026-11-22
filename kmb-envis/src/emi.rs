@@ -138,8 +138,7 @@ pub fn feeders(config: &Description) -> Result<Vec<Feeder>, String> {
                 let end = at(names_stride, base.saturating_add(20));
                 ident_s
                     .get(start..end)
-                    .map(kmb::decode::kmb_string)
-                    .unwrap_or_default()
+                    .map_or_default(kmb::decode::kmb_string)
             })
             .collect();
         let serial = if wide {
