@@ -117,9 +117,22 @@ pub async fn run_job(
         });
     }
     let mut client = cx.device.connect(cx.traffic).await?;
+    let result = run_connected(cx, &mut client, session, job).await;
+    if let Err(e) = &result {
+        cx.device.update(|s| s.last_error = Some(format!("{e:#}")));
+    }
+    result
+}
+
+async fn run_connected(
+    cx: &RunContext<'_>,
+    client: &mut MeterClient,
+    session: &mut Option<Described>,
+    job: &Job,
+) -> Result<Summary> {
     let id = client.identify().await.context("identify")?;
     let summary = IdentitySummary::new(&id, client.is_encrypted());
-    cx.device.update(|s| s.identity = Some(summary));
+    cx.device.answered(summary);
     if session
         .as_ref()
         .is_some_and(|d| !d.matches(&id) || d.at.elapsed() > cx.describe_every)
@@ -142,8 +155,8 @@ pub async fn run_job(
             .await?
     };
 
-    let result = match &job.task {
-        Task::Clock { adjust_above } => clock_job(cx, &mut client, *adjust_above).await,
+    match &job.task {
+        Task::Clock { adjust_above } => clock_job(cx, client, *adjust_above).await,
         Task::Archive { .. } | Task::Values { .. } if !id.is_universal() => Err(anyhow!(
             "meter {} is not a universal-config meter; classic meters are not supported",
             id.device_no
@@ -153,10 +166,10 @@ pub async fn run_job(
             start_from,
             ..
         } => {
-            let described = describe(session, &mut client, &id).await?;
+            let described = describe(session, client, &id).await?;
             archive_job(
                 cx,
-                &mut client,
+                client,
                 &id,
                 described,
                 measurement,
@@ -166,21 +179,10 @@ pub async fn run_job(
             .await
         }
         Task::Values { set } => {
-            let described = describe(session, &mut client, &id).await?;
-            values_job(
-                cx,
-                &mut client,
-                described,
-                measurement,
-                config::data_set(set)?,
-            )
-            .await
+            let described = describe(session, client, &id).await?;
+            values_job(cx, client, described, measurement, config::data_set(set)?).await
         }
-    };
-    if let Err(e) = &result {
-        cx.device.update(|s| s.last_error = Some(format!("{e:#}")));
     }
-    result
 }
 
 const fn unsupported(envis: bool, archive: u8) -> Option<&'static str> {
@@ -221,7 +223,7 @@ pub async fn survey(
     let mut client = device.connect(traffic).await?;
     let id = client.identify().await.context("identify")?;
     let summary = IdentitySummary::new(&id, client.is_encrypted());
-    device.update(|s| s.identity = Some(summary));
+    device.answered(summary);
     if !id.is_universal() {
         return Ok(());
     }
@@ -239,7 +241,7 @@ pub async fn identify(device: &DeviceSlot, traffic: &Traffic) -> Result<Identity
     let mut client = device.connect(traffic).await?;
     let id = client.identify().await.context("identify")?;
     let summary = IdentitySummary::new(&id, client.is_encrypted());
-    device.update(|s| s.identity = Some(summary.clone()));
+    device.answered(summary.clone());
     Ok(summary)
 }
 
@@ -408,6 +410,8 @@ async fn reconnect(cx: &RunContext<'_>, described: &Described) -> Result<MeterCl
     if !described.matches(&id) {
         return Err(OtherMeter.into());
     }
+    cx.device
+        .answered(IdentitySummary::new(&id, fresh.is_encrypted()));
     Ok(fresh)
 }
 

@@ -7,6 +7,17 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-11-22
+
+### `kmb-sync`
+
+- Fixed: a run that failed at identify or while reading the descriptions
+  set the job's error but not the device's. `kmb-sync devices` and the
+  `/api/devices` output now carry it as the device's last error too.
+- Fixed: the device's last contact time was set by the TCP connect. A
+  gateway that accepts connections while its meter stays silent no longer
+  refreshes it; it is set when the meter answered an identify.
+
 ## [1.4.2] - 2026-11-22
 
 ### `kmb-sync`
@@ -288,6 +299,7 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.4.3]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.3
 [1.4.2]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.2
 [1.4.1]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.1
 [1.4.0]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.0
