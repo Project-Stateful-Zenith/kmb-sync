@@ -2,6 +2,7 @@
 database = "/var/lib/kmb-sync/sync.db"
 listen = "127.0.0.1:8650"
 status_listen = "0.0.0.0:8651"
+status_badges = ["tls", "clock"]
 max_concurrency = 3
 
 [[device]]
@@ -64,4 +65,5 @@ name = "riverside-clock"
 device = "riverside-sub"
 kind = "clock"
 every = "4h"
+show = false
 timeout = "45s"

@@ -74,6 +74,7 @@ them readable by the service user only.
 | `status_listen` | `"0.0.0.0:8651"` | address of the read-only status page; `"off"` disables it. Must not share a port with `listen` |
 | `status_api` | `false` | also serve the status page's data as JSON at `/api/stations`; requires `status_api_token_file` |
 | `status_api_token_file` | none | file with the bearer token for `/api/stations` |
+| `status_badges` | `["tls", "psk", "clock"]` | badges shown next to each station name on the status page, each name at most once: `"tls"` (link uses TLS), `"psk"` (meter uses the PSK envelope; grey until the meter has answered an identify), `"clock"` (an enabled clock job with `adjust_above` keeps the meter clock set; amber when its last run failed). Green when true, red and crossed out when not; `[]` shows none |
 | `max_concurrency` | `4` | jobs that may run at the same time, across all meters. Jobs of one meter never run at the same time |
 | `heartbeat` | `"5m"` | how often the service records that it is alive; after a restart it reports how long it was down |
 | `describe_every` | `"6h"` | how often a meter's self-description (its archives and fields) is read again, besides when its identity changes |
@@ -104,6 +105,7 @@ should not be visible.
 | `byte_timeout` | `"10s"` | time allowed between bytes of a reply; a whole reply frame must also arrive within 60 s. Keep it below 60 s: from 60 s on a silent meter is only noticed at the frame limit and lost replies are not reliably retried. After a timeout, a closed connection or a socket error the run reconnects before the next archive, trying a second time after 1 s unless another meter answered, the device is locked or the TLS certificate or handshake was refused; if that fails too, the rest of the run's archives are reported as not attempted. A failed reconnect can take two times `connect_timeout` (four with TLS) plus two times `byte_timeout` plus about 2 s, 31.6 s with the defaults |
 | `packed` | `6800` | packet size written into the ENVIS device URL (only with `[envis]`) |
 | `envis_url` | built from host, port, address and `packed` | the device URL stored in ENVIS, when it must match an existing one exactly |
+| `show` | `true` | `false` leaves the station and all its jobs off the status page. The meter is still synced, `/api/stations` still lists it (with `"show": false`), and `kmb-sync check` marks it `(hidden)`. If every station is hidden the page says "No stations shown." |
 
 With `tls = true`, set `tls_root`, `tls_pins` or both. A certificate is
 accepted when it is pinned or when its chain leads to `tls_root` and, with
@@ -123,6 +125,7 @@ Settings every job has:
 | `start_time` | none | align runs to this local time of day (instead of `anchor`, with `every` of at most `24h`); the zone is `[envis].time_zone` or the host's. Use an `every` that divides 24h, or runs around midnight are unevenly spaced (`check` warns) |
 | `timeout` | `"10m"` | maximum time of one run. It counts only while the run holds the meter, so jobs waiting for the same meter do not use up their time. Give values jobs more than twice the device's `byte_timeout`: a lost description or values reply is retried only after the line has been quiet for one `byte_timeout`. Clock reads are not retried |
 | `enabled` | `true` | `false` keeps the job configured but never runs it |
+| `show` | `true` | `false` leaves the job's row and runs off the status page; the job still runs, and its failures no longer colour the station. Device-level state still reflects it: its connect failures count toward the lockout (the red "Locked" box), and the station line keeps the clock offset, traffic and badges. An archive synced only by hidden jobs is left out of the archive list and counted as hidden; when all of a station's archive jobs are hidden, the archive list is left out. `/api/stations` still lists the job (with `"show": false`), and `kmb-sync check` marks it `(hidden)` |
 | `measurement` | `"default"` | name of the measurement the records are stored under, when one meter feeds several |
 
 Without `anchor` or `start_time`, the first run starts when the service

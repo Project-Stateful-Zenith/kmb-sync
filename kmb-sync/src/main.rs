@@ -211,6 +211,17 @@ fn check(path: &std::path::Path) -> Result<()> {
                 ""
             };
             writeln!(out, "status page on http://{addr}/{api}")?;
+            let badges: Vec<&str> = config
+                .service
+                .status_badges
+                .iter()
+                .map(|b| b.name())
+                .collect();
+            if badges.is_empty() {
+                writeln!(out, "status page badges: none")?;
+            } else {
+                writeln!(out, "status page badges: {}", badges.join(", "))?;
+            }
         }
         None => writeln!(out, "status page off")?,
     }
@@ -223,16 +234,22 @@ fn check(path: &std::path::Path) -> Result<()> {
         None => writeln!(out, "run log kept forever")?,
     }
     for d in &config.devices {
+        let hidden = if d.show { "" } else { " (hidden)" };
         writeln!(
             out,
-            "device {} at {} path {:?}",
+            "device {} at {} path {:?}{hidden}",
             d.name,
             d.url(),
             d.object_path()
         )?;
     }
     for j in &config.jobs {
-        let state = if j.enabled { "" } else { " (disabled)" };
+        let state = match (j.enabled, j.show) {
+            (true, true) => "",
+            (false, true) => " (disabled)",
+            (true, false) => " (hidden)",
+            (false, false) => " (disabled, hidden)",
+        };
         writeln!(
             out,
             "job {} on {} every {}{state}: {:?}",

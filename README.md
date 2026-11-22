@@ -50,7 +50,7 @@ Ready-to-copy examples, all with made-up data:
 | Example | Shows |
 | --- | --- |
 | [minimal.toml](deploy/examples/minimal.toml) | one meter with archive, values and clock jobs |
-| [multi-station.toml](deploy/examples/multi-station.toml) | several meters, schedules and byte budgets |
+| [multi-station.toml](deploy/examples/multi-station.toml) | several meters, schedules and byte budgets, a status page with chosen badges and a hidden job |
 | [secure-meter.toml](deploy/examples/secure-meter.toml) | TLS, encrypted links, logins, clock adjustment |
 | [envis.toml](deploy/examples/envis.toml) | writing into an ENVIS database |
 | [remote-api.toml](deploy/examples/remote-api.toml) | API and status JSON for other hosts, with tokens |
@@ -66,6 +66,12 @@ between the time of the oldest shown and the latest poll, the next sync,
 link bytes today and yesterday, each meter's clock offset (a warning above
 60 s), and per-archive state. The footer shows the
 running version. It follows the browser's light or dark setting.
+
+Next to each station name, badges show whether the link uses TLS, whether
+the meter uses its PSK envelope, and whether a clock job keeps the meter
+clock set; `status_badges` picks which. `show = false` on a device or job
+leaves it off the page while it keeps running. See
+[deploy/README.md](deploy/README.md).
 
 ![Status page](docs/status.png)
 

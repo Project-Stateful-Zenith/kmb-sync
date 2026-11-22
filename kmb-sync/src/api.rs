@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub const MAX_RECORDS: usize = 100_000;
 pub const RECENT_RUNS: usize = 48;
@@ -138,7 +139,7 @@ pub fn status_router(service: Arc<Service>, api_token: Option<String>) -> Router
 }
 
 async fn status_page(State(s): State<Arc<Service>>) -> Response {
-    let data = match overview(&s).await {
+    let data = match overview(&s, View::Shown).await {
         Ok(data) => data,
         Err(ApiError(_, e)) => {
             tracing::error!("status page: {e}");
@@ -161,10 +162,102 @@ async fn status_page(State(s): State<Arc<Service>>) -> Response {
 struct Station {
     #[serde(flatten)]
     device: DeviceStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    show: Option<bool>,
     jobs: Vec<StationJob>,
     archives: Vec<StationArchive>,
     archives_known: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    archives_hidden: Option<usize>,
     traffic: Vec<kmb_store::DeviceDay>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jobs_hidden: Option<usize>,
+    clock: ClockStatus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ClockState {
+    Kept,
+    Failing,
+    Paused,
+    ReadOnly,
+    None,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct ClockStatus {
+    state: ClockState,
+    every_ms: Option<u64>,
+    adjust_above_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+struct ClockJob {
+    every: Duration,
+    adjust_above: Option<Duration>,
+    paused: bool,
+    last_outcome: Option<String>,
+}
+
+fn millis(d: Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn clock_status(jobs: &[ClockJob]) -> ClockStatus {
+    let failing = |j: &&ClockJob| matches!(j.last_outcome.as_deref(), Some("failed" | "timeout"));
+    let adjusting: Vec<&ClockJob> = jobs.iter().filter(|j| j.adjust_above.is_some()).collect();
+    let active: Vec<&ClockJob> = adjusting.iter().copied().filter(|j| !j.paused).collect();
+    let (state, job) = active
+        .iter()
+        .find(|j| !failing(j))
+        .map(|j| (ClockState::Kept, *j))
+        .or_else(|| active.first().map(|j| (ClockState::Failing, *j)))
+        .or_else(|| adjusting.first().map(|j| (ClockState::Paused, *j)))
+        .or_else(|| jobs.first().map(|j| (ClockState::ReadOnly, j)))
+        .map_or((ClockState::None, None), |(state, j)| (state, Some(j)));
+    ClockStatus {
+        state,
+        every_ms: job.map(|j| millis(j.every)),
+        adjust_above_ms: job.and_then(|j| j.adjust_above).map(millis),
+    }
+}
+
+fn device_clock(s: &Service, device: &str) -> ClockStatus {
+    let jobs: Vec<ClockJob> = s
+        .jobs
+        .iter()
+        .filter(|j| j.job.device == device && j.job.enabled)
+        .filter_map(|j| match &j.job.task {
+            Task::Clock { adjust_above } => Some(ClockJob {
+                every: j.job.every,
+                adjust_above: *adjust_above,
+                paused: j.update(|st| st.paused),
+                last_outcome: j.update(|st| st.last_outcome.clone()),
+            }),
+            _ => None,
+        })
+        .collect();
+    clock_status(&jobs)
+}
+
+#[derive(Clone, Copy)]
+enum View {
+    Shown,
+    All,
+}
+
+impl View {
+    const fn includes(self, show: bool) -> bool {
+        show || matches!(self, Self::All)
+    }
+
+    const fn flag(self, show: bool) -> Option<bool> {
+        match self {
+            Self::Shown => None,
+            Self::All => Some(show),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -175,41 +268,61 @@ struct StationArchive {
     jobs: Vec<String>,
 }
 
-fn station_archives(s: &Service, device: &mut DeviceStatus) -> (Vec<StationArchive>, bool) {
-    let selections: Vec<(&str, &Archives)> = s
+struct StationArchives {
+    list: Vec<StationArchive>,
+    known: bool,
+    hidden: usize,
+}
+
+struct Selection<'a> {
+    job: &'a str,
+    shown: bool,
+    archives: &'a Archives,
+}
+
+fn station_archives(s: &Service, device: &mut DeviceStatus, view: View) -> StationArchives {
+    let selections: Vec<Selection<'_>> = s
         .jobs
         .iter()
         .filter(|j| j.job.device == device.name)
         .filter_map(|j| match &j.job.task {
-            Task::Archive { archives, .. } => Some((j.job.name.as_str(), archives)),
+            Task::Archive { archives, .. } => Some(Selection {
+                job: j.job.name.as_str(),
+                shown: view.includes(j.job.show),
+                archives,
+            }),
             _ => None,
         })
         .collect();
-    let syncing = |a: &ArchiveState| -> Vec<String> {
+    let offered = device.archives.take();
+    if !selections.is_empty() && !selections.iter().any(|sel| sel.shown) {
+        return StationArchives {
+            list: Vec::new(),
+            known: false,
+            hidden: 0,
+        };
+    }
+    let syncing = |a: &ArchiveState| -> Vec<&Selection<'_>> {
         selections
             .iter()
-            .filter(|(_, sel)| match sel {
+            .filter(|sel| match sel.archives {
                 Archives::All => a.unsupported.is_none(),
-                Archives::List(_) => sel.includes(a.archive),
+                Archives::List(_) => sel.archives.includes(a.archive),
             })
-            .map(|(n, _)| (*n).to_string())
             .collect()
     };
-    let offered = device.archives.take();
     let known = offered.is_some();
-    let mut list: Vec<StationArchive> = offered
+    let mut entries: Vec<(ArchiveState, Option<bool>)> = offered
         .unwrap_or_default()
         .into_iter()
-        .map(|a| StationArchive {
-            jobs: syncing(&a),
-            offered: Some(true),
-            state: a,
-        })
+        .map(|a| (a, Some(true)))
         .collect();
-    for (_, sel) in &selections {
-        let Archives::List(l) = sel else { continue };
+    for sel in &selections {
+        let Archives::List(l) = sel.archives else {
+            continue;
+        };
         for n in l.iter().filter_map(|a| a.number().ok()) {
-            if list.iter().any(|a| a.state.archive == n) {
+            if entries.iter().any(|(a, _)| a.archive == n) {
                 continue;
             }
             let state = ArchiveState {
@@ -217,29 +330,60 @@ fn station_archives(s: &Service, device: &mut DeviceStatus) -> (Vec<StationArchi
                 name: kmb::archive::uni::archive_name(n).unwrap_or("?").into(),
                 ..ArchiveState::default()
             };
-            list.push(StationArchive {
-                jobs: syncing(&state),
-                offered: known.then_some(false),
-                state,
-            });
+            entries.push((state, known.then_some(false)));
         }
     }
-    (list, known)
+    let mut hidden: usize = 0;
+    let mut list = Vec::with_capacity(entries.len());
+    for (state, offered) in entries {
+        let by = syncing(&state);
+        if !by.is_empty() && !by.iter().any(|sel| sel.shown) {
+            hidden = hidden.saturating_add(1);
+            continue;
+        }
+        list.push(StationArchive {
+            jobs: by
+                .iter()
+                .filter(|sel| sel.shown)
+                .map(|sel| sel.job.to_string())
+                .collect(),
+            offered,
+            state,
+        });
+    }
+    StationArchives {
+        list,
+        known,
+        hidden,
+    }
 }
 
 #[derive(Serialize)]
 struct StationJob {
     #[serde(flatten)]
     state: JobState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    show: Option<bool>,
     recent: Vec<kmb_store::Run>,
 }
 
 async fn stations(State(s): State<Arc<Service>>) -> ApiResult {
-    overview(&s).await.map(Json)
+    overview(&s, View::All).await.map(Json)
 }
 
-async fn overview(s: &Service) -> Result<Value, ApiError> {
-    let names: Vec<String> = s.jobs.iter().map(|j| j.job.name.clone()).collect();
+async fn overview(s: &Service, view: View) -> Result<Value, ApiError> {
+    let devices: Vec<&crate::config::Device> = s
+        .config
+        .devices
+        .iter()
+        .filter(|d| view.includes(d.show))
+        .collect();
+    let names: Vec<String> = s
+        .jobs
+        .iter()
+        .filter(|j| view.includes(j.job.show) && devices.iter().any(|d| d.name == j.job.device))
+        .map(|j| j.job.name.clone())
+        .collect();
     let now = jiff::Zoned::now();
     let first = now
         .date()
@@ -256,20 +400,24 @@ async fn overview(s: &Service) -> Result<Value, ApiError> {
             Ok((recent, st.device_days(first)?))
         })
         .await?;
-    let list: Vec<Station> = s
-        .config
-        .devices
+    let stations_hidden = s.config.devices.len().saturating_sub(devices.len());
+    let list: Vec<Station> = devices
         .iter()
-        .filter_map(|d| s.devices.get(&d.name))
-        .map(|d| {
-            let mut device = d.snapshot();
-            let (archives, archives_known) = station_archives(s, &mut device);
-            let jobs = s
+        .filter_map(|d| s.devices.get(&d.name).map(|slot| (d, slot)))
+        .map(|(d, slot)| {
+            let mut device = slot.snapshot();
+            let archives = station_archives(s, &mut device, view);
+            let clock = device_clock(s, &device.name);
+            let (jobs, hidden): (Vec<_>, Vec<_>) = s
                 .jobs
                 .iter()
                 .filter(|j| j.job.device == device.name)
+                .partition(|j| view.includes(j.job.show));
+            let jobs = jobs
+                .into_iter()
                 .map(|j| StationJob {
                     recent: recent.remove(&j.job.name).unwrap_or_default(),
+                    show: view.flag(j.job.show),
                     state: j.snapshot(),
                 })
                 .collect();
@@ -280,19 +428,30 @@ async fn overview(s: &Service) -> Result<Value, ApiError> {
                 .collect();
             Station {
                 device,
+                show: view.flag(d.show),
                 jobs,
-                archives,
-                archives_known,
+                archives: archives.list,
+                archives_known: archives.known,
+                archives_hidden: (archives.hidden > 0).then_some(archives.hidden),
                 traffic,
+                jobs_hidden: (!hidden.is_empty()).then_some(hidden.len()),
+                clock,
             }
         })
         .collect();
-    Ok(json!({
+    let mut data = json!({
         "now": clock::now_ms(),
         "today": now.date().to_string(),
         "started_at": s.started_at,
+        "badges": s.config.service.status_badges,
         "stations": to_json(list)?.0,
-    }))
+    });
+    if stations_hidden > 0
+        && let Some(obj) = data.as_object_mut()
+    {
+        obj.insert("stations_hidden".into(), stations_hidden.into());
+    }
+    Ok(data)
 }
 
 async fn identify(State(s): State<Arc<Service>>, Path(name): Path<String>) -> ApiResult {
@@ -478,8 +637,9 @@ async fn download_states(State(s): State<Arc<Service>>, Query(q): Query<StatesQu
 
 #[cfg(test)]
 mod tests {
-    use super::same;
+    use super::{ClockState, same};
     use axum::http::header;
+    use std::time::Duration;
 
     #[test]
     fn loopback_hosts() {
@@ -490,6 +650,59 @@ mod tests {
         assert!(
             !ok("evil.example:8650") && !ok("192.168.1.2:8650") && !ok("localhost.evil.example")
         );
+    }
+
+    fn job(adjust_above: Option<u64>, paused: bool, last: Option<&str>) -> super::ClockJob {
+        super::ClockJob {
+            every: Duration::from_hours(1),
+            adjust_above: adjust_above.map(Duration::from_secs),
+            paused,
+            last_outcome: last.map(Into::into),
+        }
+    }
+
+    fn state(jobs: &[super::ClockJob]) -> ClockState {
+        super::clock_status(jobs).state
+    }
+
+    #[test]
+    fn clock_state_follows_the_clock_jobs() {
+        assert_eq!(state(&[]), ClockState::None);
+        assert_eq!(state(&[job(None, false, Some("ok"))]), ClockState::ReadOnly);
+        assert_eq!(state(&[job(None, true, None)]), ClockState::ReadOnly);
+        assert_eq!(state(&[job(Some(3), false, None)]), ClockState::Kept);
+        assert_eq!(state(&[job(Some(3), false, Some("ok"))]), ClockState::Kept);
+        assert_eq!(
+            state(&[job(Some(3), false, Some("failed"))]),
+            ClockState::Failing
+        );
+        assert_eq!(
+            state(&[job(Some(3), false, Some("timeout"))]),
+            ClockState::Failing
+        );
+        assert_eq!(state(&[job(Some(3), true, Some("ok"))]), ClockState::Paused);
+        assert_eq!(
+            state(&[job(None, false, Some("ok")), job(Some(3), true, None)]),
+            ClockState::Paused,
+            "the adjusting job is paused; resuming it is the fix, not adjust_above"
+        );
+        assert_eq!(
+            state(&[
+                job(Some(3), false, Some("failed")),
+                job(Some(5), false, Some("ok"))
+            ]),
+            ClockState::Kept
+        );
+    }
+
+    #[test]
+    fn clock_status_reports_the_job_that_decides() {
+        let status = super::clock_status(&[job(None, false, None), job(Some(0), false, None)]);
+        assert_eq!(status.state, ClockState::Kept);
+        assert_eq!(status.every_ms, Some(3_600_000));
+        assert_eq!(status.adjust_above_ms, Some(0));
+        let status = super::clock_status(&[]);
+        assert_eq!((status.every_ms, status.adjust_above_ms), (None, None));
     }
 
     #[test]

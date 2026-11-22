@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use kmb::archive::uni::archive_name;
 use kmb::uni::DataSet;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -68,9 +68,34 @@ pub struct Service {
     pub describe_every: Duration,
     #[serde(default, with = "duration::option")]
     pub run_log_rotate: Option<Duration>,
+    #[serde(default = "all_status_badges")]
+    pub status_badges: Vec<StatusBadge>,
     /// Whether the file sets `status_listen`; filled in by [`Config::load`].
     #[serde(skip)]
     pub status_listen_set: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum StatusBadge {
+    Tls,
+    Psk,
+    Clock,
+}
+
+impl StatusBadge {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Tls => "tls",
+            Self::Psk => "psk",
+            Self::Clock => "clock",
+        }
+    }
+}
+
+fn all_status_badges() -> Vec<StatusBadge> {
+    vec![StatusBadge::Tls, StatusBadge::Psk, StatusBadge::Clock]
 }
 
 /// Shortest `run_log_rotate` accepted.
@@ -108,6 +133,10 @@ const fn default_describe_every() -> Duration {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is an independent on/off key of [[device]] in the configuration file"
+)]
 pub struct Device {
     pub name: String,
     pub host: String,
@@ -141,6 +170,8 @@ pub struct Device {
     pub packed: u32,
     #[serde(default)]
     pub envis_url: Option<String>,
+    #[serde(default = "yes")]
+    pub show: bool,
 }
 
 const fn default_packed() -> u32 {
@@ -366,6 +397,8 @@ pub struct Job {
     pub measurement: String,
     #[serde(default = "yes")]
     pub enabled: bool,
+    #[serde(default = "yes")]
+    pub show: bool,
     #[serde(flatten)]
     pub task: Task,
 }
@@ -442,6 +475,18 @@ impl Config {
     fn check_service(&self) -> Result<()> {
         if self.service.max_concurrency == 0 {
             bail!("service.max_concurrency must be at least 1");
+        }
+        let badges = &self.service.status_badges;
+        if let Some((i, b)) = badges
+            .iter()
+            .enumerate()
+            .find(|(i, b)| badges.iter().take(*i).any(|x| x == *b))
+        {
+            bail!(
+                "service.status_badges lists {:?} twice (entry {})",
+                b.name(),
+                i.saturating_add(1)
+            );
         }
         if self
             .service
@@ -886,6 +931,48 @@ every = "1h"
         assert_eq!(c.jobs[1].name, "station-a-values-1");
         assert_eq!(c.jobs[2].task, Task::Clock { adjust_above: None });
         assert_eq!(c.service.heartbeat, Duration::from_secs(300));
+        assert!(c.devices[0].show && c.jobs.iter().all(|j| j.show));
+    }
+
+    #[test]
+    fn status_badges_default_to_all_and_reject_unknown_names() {
+        let c: Config = toml::from_str(EXAMPLE).unwrap();
+        assert_eq!(
+            c.service.status_badges,
+            [StatusBadge::Tls, StatusBadge::Psk, StatusBadge::Clock]
+        );
+        let with = |list: &str| {
+            toml::from_str::<Config>(&EXAMPLE.replacen(
+                "[service]",
+                &format!("[service]\nstatus_badges = {list}"),
+                1,
+            ))
+        };
+        assert_eq!(
+            with(r#"["clock"]"#).unwrap().service.status_badges,
+            [StatusBadge::Clock]
+        );
+        assert_eq!(with("[]").unwrap().service.status_badges, []);
+        let err = with(r#"["tls", "lock"]"#).unwrap_err().to_string();
+        assert!(err.contains("lock"), "{err}");
+        let err = with(r#"["tls", "clock", "tls"]"#)
+            .unwrap()
+            .check()
+            .unwrap_err()
+            .to_string();
+        assert_eq!(err, r#"service.status_badges lists "tls" twice (entry 3)"#);
+    }
+
+    #[test]
+    fn show_can_be_turned_off() {
+        let text = EXAMPLE
+            .replacen("[[device]]", "[[device]]\nshow = false", 1)
+            .replacen("[[job]]", "[[job]]\nshow = false", 1);
+        let mut c: Config = toml::from_str(&text).unwrap();
+        c.check().unwrap();
+        assert!(!c.devices[0].show);
+        assert!(!c.jobs[0].show);
+        assert!(c.jobs[1].show);
     }
 
     #[test]

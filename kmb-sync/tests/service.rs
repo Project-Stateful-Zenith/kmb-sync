@@ -1017,6 +1017,226 @@ async fn status_page_is_open_and_its_api_opt_in() {
     assert_eq!(statuses, [404, 200, 401, 401, 200, 404, 404]);
 }
 
+async fn page_and_api(service: Arc<Service>) -> (String, serde_json::Value, serde_json::Value) {
+    let app = kmb_sync::api::status_router(service, Some("view".into()));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tokio::task::spawn_blocking(move || {
+        let agent = ureq::agent();
+        let page = agent
+            .get(format!("{base}/"))
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_to_string()
+            .unwrap();
+        let api = agent
+            .get(format!("{base}/api/stations"))
+            .header("Authorization", "Bearer view")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        let (_, data) = page
+            .split_once(r#"<script id="data" type="application/json">"#)
+            .unwrap();
+        let (data, _) = data.split_once("</script>").unwrap();
+        let data = serde_json::from_str(data).unwrap();
+        (page, data, api)
+    })
+    .await
+    .unwrap()
+}
+
+fn names(list: &serde_json::Value) -> Vec<&str> {
+    list.as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["name"].as_str().unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn status_page_leaves_out_what_is_not_shown() {
+    let dir = tempfile::tempdir().unwrap();
+    let extra = r#"show = false
+
+[[device]]
+name = "hidden"
+host = "127.0.0.1"
+port = 1
+show = false
+
+[[job]]
+device = "hidden"
+kind = "values"
+set = "ActData"
+"#;
+    let service = Service::new(config(&dir.path().join("t.db"), 1, extra)).unwrap();
+    let (page, data, api) = page_and_api(service).await;
+
+    assert_eq!(names(&data["stations"]), ["m"]);
+    assert_eq!(data["stations_hidden"], 1);
+    let station = &data["stations"][0];
+    assert_eq!(names(&station["jobs"]), ["m-archive-1", "m-values-1"]);
+    assert_eq!(station["jobs_hidden"], 1);
+    assert!(station.get("show").is_none() && station["jobs"][0].get("show").is_none());
+    assert!(!page.contains("m-clock-1") && !page.contains("hidden-values-1"));
+    assert_eq!(
+        station["clock"],
+        serde_json::json!({ "state": "read_only", "every_ms": 60000, "adjust_above_ms": null }),
+        "a hidden clock job still tells whether the clock is kept"
+    );
+
+    assert_eq!(names(&api["stations"]), ["m", "hidden"]);
+    assert!(api.get("stations_hidden").is_none());
+    assert_eq!(
+        names(&api["stations"][0]["jobs"]),
+        ["m-archive-1", "m-values-1", "m-clock-1"]
+    );
+    assert_eq!(api["stations"][0]["show"], true);
+    assert_eq!(api["stations"][1]["show"], false);
+    assert_eq!(api["stations"][0]["jobs"][1]["show"], true);
+    assert_eq!(api["stations"][0]["jobs"][2]["show"], false);
+    assert!(api["stations"][0].get("jobs_hidden").is_none());
+}
+
+#[tokio::test]
+async fn status_page_says_when_everything_is_hidden() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut conf = config(&dir.path().join("t.db"), 1, "");
+    for job in &mut conf.jobs {
+        job.show = false;
+    }
+    let (_, data, _) = page_and_api(Service::new(conf).unwrap()).await;
+    let station = &data["stations"][0];
+    assert_eq!(station["jobs"], serde_json::json!([]));
+    assert_eq!(station["jobs_hidden"], 3);
+    assert_eq!(station["archives"], serde_json::json!([]));
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut conf = config(&dir.path().join("t.db"), 1, "");
+    conf.devices[0].show = false;
+    let (page, data, _) = page_and_api(Service::new(conf).unwrap()).await;
+    assert_eq!(data["stations"], serde_json::json!([]));
+    assert_eq!(data["stations_hidden"], 1);
+    assert!(!page.contains("m-archive-1"));
+}
+
+#[tokio::test]
+async fn hidden_archive_jobs_and_their_runs_stay_off_the_page() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    {
+        let mut m = meter.lock().unwrap();
+        m.two_archives = true;
+        m.records = (0..2).map(|i| record(minute(i), 230.0)).collect();
+    }
+    let port = start_meter(meter).await;
+    let dir = tempfile::tempdir().unwrap();
+    let extra = r#"
+[[job]]
+device = "m"
+kind = "archive"
+archives = ["Elmeter"]
+show = false
+"#;
+    let service = Service::new(config(&dir.path().join("t.db"), port, extra)).unwrap();
+    run(&service, "m-archive-1").await;
+    let hidden = service.job("m-archive-2").unwrap().clone();
+    let _ = service.run_once(&hidden).await;
+    let (page, data, api) = page_and_api(service).await;
+
+    let station = &data["stations"][0];
+    assert_eq!(station["archives_known"], true);
+    assert_eq!(station["archives_hidden"], 1);
+    let archives = station["archives"].as_array().unwrap();
+    assert_eq!(archives.len(), 1, "{archives:?}");
+    assert_eq!(archives[0]["name"], "Main");
+    assert_eq!(archives[0]["jobs"], serde_json::json!(["m-archive-1"]));
+    assert!(
+        !page.contains("m-archive-2"),
+        "neither the hidden job nor its runs are in the page"
+    );
+    assert_eq!(api["stations"][0]["archives"].as_array().unwrap().len(), 2);
+    assert!(
+        api.get("stations")
+            .unwrap()
+            .to_string()
+            .contains("m-archive-2")
+    );
+}
+
+#[tokio::test]
+async fn archive_shared_with_a_hidden_job_stays_with_the_shown_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let extra = r#"
+[[job]]
+device = "m"
+kind = "archive"
+archives = ["Main"]
+"#;
+    let mut config = config(&dir.path().join("t.db"), 1, extra);
+    config.jobs[0].show = false;
+    let (page, data, _) = page_and_api(Service::new(config).unwrap()).await;
+    let station = &data["stations"][0];
+    assert_eq!(
+        station["archives"][0]["jobs"],
+        serde_json::json!(["m-archive-2"])
+    );
+    assert!(station.get("archives_hidden").is_none());
+    assert!(!page.contains("m-archive-1"));
+}
+
+#[tokio::test]
+async fn status_page_tells_whether_the_clock_is_kept() {
+    let clock_of = |data: &serde_json::Value| data["stations"][0]["clock"].clone();
+
+    let dir = tempfile::tempdir().unwrap();
+    let service = Service::new(config(
+        &dir.path().join("t.db"),
+        1,
+        "every = \"1h\"\nadjust_above = \"3s\"",
+    ))
+    .unwrap();
+    let (_, data, _) = page_and_api(service.clone()).await;
+    assert_eq!(
+        clock_of(&data),
+        serde_json::json!({ "state": "kept", "every_ms": 3_600_000, "adjust_above_ms": 3000 })
+    );
+
+    service
+        .job("m-clock-1")
+        .unwrap()
+        .update(|s| s.paused = true);
+    let (_, data, _) = page_and_api(service).await;
+    assert_eq!(clock_of(&data)["state"], "paused");
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = config(&dir.path().join("t.db"), 1, "adjust_above = \"3s\"");
+    config.jobs[2].enabled = false;
+    let (_, data, _) = page_and_api(Service::new(config).unwrap()).await;
+    assert_eq!(
+        clock_of(&data),
+        serde_json::json!({ "state": "none", "every_ms": null, "adjust_above_ms": null })
+    );
+}
+
+#[tokio::test]
+async fn status_page_gets_the_badges_to_show() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = Service::new(config(&dir.path().join("t.db"), 1, "")).unwrap();
+    let (_, data, _) = page_and_api(service).await;
+    assert_eq!(data["badges"], serde_json::json!(["tls", "psk", "clock"]));
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = config(&dir.path().join("t.db"), 1, "");
+    config.service.status_badges = vec![kmb_sync::config::StatusBadge::Clock];
+    let (_, data, _) = page_and_api(Service::new(config).unwrap()).await;
+    assert_eq!(data["badges"], serde_json::json!(["clock"]));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn byte_limit_bounds_each_run_and_resumes() {
     const LIMIT: u64 = 2048;
