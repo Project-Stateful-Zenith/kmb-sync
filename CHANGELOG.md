@@ -20,8 +20,8 @@ first released with. The format follows
   write them in days instead.
 - Correction: other forms humantime took are refused too: a bare `"0"`
   (write `"0s"`), units out of order or repeated (`"30m 1h"`, `"1s 1s"`),
-  fractional days or weeks (`"1.5d"`), digit groups (`"1 000s"`) and values
-  above about 20,000 years. ISO 8601 forms such as `"PT15M"` are newly
+  fractional days or weeks (`"1.5d"`), digit groups (`"1 000s"`) and day or
+  week counts above about 20,000 years. ISO 8601 forms such as `"PT15M"` are newly
   accepted.
 - `kmb-sync check` prints a job interval of a day or more in hours, such
   as `every 24h` instead of `every 1day`.

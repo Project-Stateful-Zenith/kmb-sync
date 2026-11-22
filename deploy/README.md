@@ -95,13 +95,13 @@ should not be visible.
 | `credentials_file` | none | file with the meter login: user on the first line, password on the second |
 | `psk_file` | none | file with the meter's pre-shared key for encrypted links, Base64 of 32 bytes. The envelope starts only when the meter asks for it; a meter that also answers cleartext is read in cleartext |
 | `require_encryption` | `false` | with `psk_file`: refuse a meter that answers in cleartext, before any request carrying the PIN is sent. Leave it off for a meter whose key is set but that still accepts cleartext requests: such a meter fails at identify with `envelope: command 1 is not the envelope 111` |
-| `refuse_cleartext_pin` | `false` | with `credentials_file`: fail a request that carries the PIN unless the envelope or TLS protects it. Needs `psk_file` or `tls` |
+| `refuse_cleartext_pin` | `false` | with `credentials_file`: fail a request that carries the PIN unless the envelope or TLS protects it. Needs `psk_file` or `tls`. With `psk_file` on a meter that still accepts cleartext requests, every values and archive run fails at the first description read with `the PIN would be sent in cleartext` |
 | `tls` | `false` | connect over TLS; needs a build with `--features tls` |
 | `tls_root` | none | public key of the root CA that signed the meter's certificate: an uncompressed P-256 point in hex (`04`, then X and Y) |
 | `tls_pins` | `[]` | SHA-256 fingerprints of meter certificates to accept, hex with or without `:` |
 | `tls_common_name` | none | with `tls_root`: accept a certificate through the root only when its common name is this, so another meter's certificate from the same CA is refused |
 | `connect_timeout` | `"5s"` | time allowed to open the connection |
-| `byte_timeout` | `"10s"` | time allowed between bytes of a reply; a whole reply frame must also arrive within 60 s. After a timeout the run reconnects before the next archive |
+| `byte_timeout` | `"10s"` | time allowed between bytes of a reply; a whole reply frame must also arrive within 60 s. After a timeout, a closed connection or a socket error the run reconnects before the next archive, trying a second time after 1 s; if that fails too, the rest of the run's archives are reported as not attempted |
 | `packed` | `6800` | packet size written into the ENVIS device URL (only with `[envis]`) |
 | `envis_url` | built from host, port, address and `packed` | the device URL stored in ENVIS, when it must match an existing one exactly |
 
@@ -121,7 +121,7 @@ Settings every job has:
 | `every` | `"1m"` | how often the job runs |
 | `anchor` | none | align runs to this time plus multiples of `every`, e.g. on the quarter hour |
 | `start_time` | none | align runs to this local time of day (instead of `anchor`, with `every` of at most `24h`); the zone is `[envis].time_zone` or the host's. Use an `every` that divides 24h, or runs around midnight are unevenly spaced (`check` warns) |
-| `timeout` | `"10m"` | maximum time of one run. It counts only while the run holds the meter, so jobs waiting for the same meter do not use up their time. Give values and clock jobs more than twice the device's `byte_timeout`: a lost reply is retried only after the line has been quiet for one `byte_timeout` |
+| `timeout` | `"10m"` | maximum time of one run. It counts only while the run holds the meter, so jobs waiting for the same meter do not use up their time. Give values jobs more than twice the device's `byte_timeout`: a lost description or values reply is retried only after the line has been quiet for one `byte_timeout`. Clock reads are not retried |
 | `enabled` | `true` | `false` keeps the job configured but never runs it |
 | `measurement` | `"default"` | name of the measurement the records are stored under, when one meter feeds several |
 
@@ -194,8 +194,10 @@ stay in kmb-sync's own database only.
 ENVIS object and measurement names come from the meter's notebook (the
 first and second 32 bytes); LB feeder measurements are named
 `<module>.<feeder>` from the LocalBus module's identification. All are
-decoded as CP1252: `0xFF` and `?` become spaces, the name is trimmed, an
-empty name becomes `DEFAULT`, and object names are cut to 32 characters.
+decoded as CP1252, and object names are cut to 32 characters. In the
+notebook names `0xFF` and `?` become spaces, the name is trimmed and an
+empty name becomes `DEFAULT`; an empty feeder name becomes
+`<module>.F<n>`.
 A name ENVIS does not know yet gets a new object or measurement, and its
 archive is downloaded again from `start_from`. Names stored on the meter
 in UTF-8 or another code page come out differently than in 1.3.2 and
