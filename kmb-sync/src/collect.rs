@@ -15,6 +15,7 @@ use tokio_util::sync::CancellationToken;
 
 pub const BATCHES_PER_COMMIT: u32 = 8;
 pub const MISSING_RETRIES: u32 = 2;
+pub const RECONNECT_PAUSE: std::time::Duration = std::time::Duration::from_secs(1);
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Summary {
@@ -264,8 +265,12 @@ async fn archive_job(
         if let Err(e) = reconnect_if(cx, client, described, &mut reconnect_first).await {
             let rest = list.get(at..).unwrap_or_default();
             failed = failed.saturating_add(rest.len());
-            out.errors
-                .push(format!("{} not attempted: {e:#}", archive_names(rest)));
+            let reason = format!("not attempted: {e:#}");
+            for &skipped in rest {
+                cx.device
+                    .update(|s| s.archive_synced(skipped, 0, None, Some(reason.clone())));
+            }
+            out.errors.push(format!("{} {reason}", archive_names(rest)));
             break;
         }
         let before = out.inserted;
@@ -342,7 +347,12 @@ fn archive_names(archives: &[u8]) -> String {
         .iter()
         .map(|&a| format!("{a} ({})", archive_name(a).unwrap_or("?")))
         .collect();
-    format!("archives {}", named.join(", "))
+    let noun = if named.len() == 1 {
+        "archive"
+    } else {
+        "archives"
+    };
+    format!("{noun} {}", named.join(", "))
 }
 
 fn disconnected(address: u8) -> MeterClient {
@@ -362,6 +372,18 @@ async fn reconnect_if(
         client,
         disconnected(cx.device.config.address),
     ));
+    let fresh = if let Ok(fresh) = reconnect(cx, described).await {
+        fresh
+    } else {
+        tokio::time::sleep(RECONNECT_PAUSE).await;
+        reconnect(cx, described).await?
+    };
+    *client = fresh;
+    *pending = false;
+    Ok(())
+}
+
+async fn reconnect(cx: &RunContext<'_>, described: &Described) -> Result<MeterClient> {
     let mut fresh = cx
         .device
         .connect(cx.traffic)
@@ -374,9 +396,7 @@ async fn reconnect_if(
     if !described.matches(&id) {
         bail!("another meter answered after the reconnect");
     }
-    *client = fresh;
-    *pending = false;
-    Ok(())
+    Ok(fresh)
 }
 
 fn resume_order(mut list: Vec<u8>, after: Option<u8>) -> Vec<u8> {
@@ -1315,6 +1335,12 @@ async fn clock_job(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archives_not_attempted_are_named() {
+        assert_eq!(archive_names(&[0]), "archive 0 (Main)");
+        assert_eq!(archive_names(&[0, 6]), "archives 0 (Main), 6 (Elmeter)");
+    }
 
     #[test]
     fn a_limited_run_resumes_after_the_archive_it_stopped_at() {

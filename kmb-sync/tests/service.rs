@@ -455,8 +455,20 @@ async fn a_failed_reconnect_ends_the_run_without_locking_the_device() {
         "{text}"
     );
     let st = service.devices["m"].snapshot();
-    assert_eq!(st.connect_failures, 1, "{st:?}");
+    assert_eq!(st.connect_failures, 2, "{st:?}");
     assert!(st.locked_until.is_none(), "{st:?}");
+    let main = st
+        .archives
+        .iter()
+        .flatten()
+        .find(|a| a.archive == 0)
+        .expect("archive 0 has a status");
+    assert!(
+        main.error
+            .as_deref()
+            .is_some_and(|e| e.starts_with("not attempted: ")),
+        "{main:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
