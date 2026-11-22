@@ -218,14 +218,14 @@ impl Service {
             Ok(Ok(summary)) => Outcome::Done(summary),
             Ok(Err(e)) => Outcome::Failed(format!("{e:#}")),
         };
-        drop(permit);
-        drop(session);
-        let finished = clock::now_ms();
-        let bytes = traffic.get();
         let detail = outcome.detail(job.timeout);
         if matches!(outcome, Outcome::Timeout) {
             device.update(|s| s.last_error.clone_from(&detail));
         }
+        drop(permit);
+        drop(session);
+        let finished = clock::now_ms();
+        let bytes = traffic.get();
         let name = outcome.name();
         slot.update(|s| {
             s.running = false;
