@@ -579,21 +579,26 @@ impl Config {
             ));
         }
         for d in &self.devices {
-            if d.credentials_file.is_some()
-                && d.psk_file.is_none()
-                && !d.tls
-                && !d.refuse_cleartext_pin
-            {
-                out.push(format!(
-                    "device {:?}: the PIN crosses the link in cleartext; set psk_file or tls, \
-                     or refuse_cleartext_pin = true to refuse sending it",
-                    d.name
-                ));
+            if d.credentials_file.is_some() && !d.tls {
+                if d.psk_file.is_none() {
+                    out.push(format!(
+                        "device {:?}: the PIN crosses the link in cleartext; set psk_file or tls",
+                        d.name
+                    ));
+                } else if !d.require_encryption && !d.refuse_cleartext_pin {
+                    out.push(format!(
+                        "device {:?}: the PIN crosses the link in cleartext if the meter answers \
+                         without the envelope; set require_encryption or refuse_cleartext_pin \
+                         once the meter refuses cleartext requests",
+                        d.name
+                    ));
+                }
             }
-            if d.byte_timeout >= kmb_tokio::REPLY_TIMEOUT {
+            if d.byte_timeout > kmb_tokio::REPLY_TIMEOUT {
                 out.push(format!(
-                    "device {:?}: byte_timeout {:?} has no effect at or above the {:?} limit for \
-                     a whole reply frame",
+                    "device {:?}: byte_timeout {:?} is above the {:?} limit for a whole reply \
+                     frame: a silent meter is only noticed at that limit and lost replies are not \
+                     retried",
                     d.name,
                     d.byte_timeout,
                     kmb_tokio::REPLY_TIMEOUT
@@ -729,6 +734,9 @@ pub fn read_secret(path: &Path) -> Result<String> {
 }
 
 fn check_link_protections(d: &Device) -> Result<()> {
+    if d.tls_common_name.as_deref().is_some_and(str::is_empty) {
+        bail!("device {:?}: tls_common_name is empty", d.name);
+    }
     if d.tls_common_name.is_some() && !(d.tls && d.tls_root.is_some()) {
         bail!(
             "device {:?}: tls_common_name needs tls = true and tls_root",
@@ -1104,6 +1112,8 @@ every = "1h"
                 .unwrap_err()
                 .contains("tls_common_name needs tls = true and tls_root")
         );
+        let mut empty = with_device(&format!("tls = true\ntls_common_name = \"\"\n{root}"));
+        assert!(format!("{:#}", empty.check().unwrap_err()).contains("tls_common_name is empty"));
     }
 
     #[test]
@@ -1117,12 +1127,12 @@ every = "1h"
         assert_eq!(
             with_device("byte_timeout = \"90s\"").warnings(),
             [
-                "device \"station-a\": byte_timeout 90s has no effect at or above the 60s limit \
-                 for a whole reply frame"
+                "device \"station-a\": byte_timeout 90s is above the 60s limit for a whole reply \
+                 frame: a silent meter is only noticed at that limit and lost replies are not retried"
             ]
         );
-        assert!(warned("byte_timeout = \"60s\""));
-        assert!(!warned("byte_timeout = \"59s\""));
+        assert!(warned("byte_timeout = \"61s\""));
+        assert!(!warned("byte_timeout = \"60s\""));
         assert!(!warned(""));
     }
 
@@ -1137,13 +1147,20 @@ every = "1h"
         assert!(warned("credentials_file = \"/c\""));
         assert_eq!(
             with_device("credentials_file = \"/c\"").warnings(),
+            ["device \"station-a\": the PIN crosses the link in cleartext; set psk_file or tls"]
+        );
+        let keyed = "credentials_file = \"/c\"\npsk_file = \"/k\"";
+        assert_eq!(
+            with_device(keyed).warnings(),
             [
-                "device \"station-a\": the PIN crosses the link in cleartext; set psk_file or \
-                 tls, or refuse_cleartext_pin = true to refuse sending it"
+                "device \"station-a\": the PIN crosses the link in cleartext if the meter answers \
+                 without the envelope; set require_encryption or refuse_cleartext_pin once the \
+                 meter refuses cleartext requests"
             ]
         );
         assert!(!warned(""));
-        assert!(!warned("credentials_file = \"/c\"\npsk_file = \"/k\""));
+        assert!(!warned(&format!("{keyed}\nrequire_encryption = true")));
+        assert!(!warned(&format!("{keyed}\nrefuse_cleartext_pin = true")));
         assert!(!warned("credentials_file = \"/c\"\ntls = true"));
     }
 
