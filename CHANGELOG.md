@@ -7,6 +7,57 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-22
+
+### `kmb-sync`
+
+- Fixed: the reconnect after a lost meter connection (1.3.3) opened the new
+  connection while the old one was still open, so a meter or gateway that
+  serves one connection at a time never answered it. The old connection is
+  now closed first.
+- Fixed: a failed reconnect is tried once more after 1 s; if that fails
+  too, the remaining archives of the run are reported as not attempted, in
+  one run error and on the status page, instead of each trying to connect.
+  Before, one run could trip the device's connect lockout. A shutdown
+  during the pause skips the second attempt, and a reconnect that needed
+  it is logged.
+- Fixed: a run also reconnects when the meter closed the connection or the
+  socket failed, not only after a timeout, and the ENVIS path reconnects
+  before it reads the Config description again.
+- New `[[device]]` options, all off by default: `require_encryption` refuses
+  a meter that answers a PSK device in cleartext (only for meters set to
+  refuse cleartext requests; a meter with a key that still accepts
+  cleartext fails at identify), `refuse_cleartext_pin` keeps the PIN off
+  links without the envelope or TLS, and `tls_common_name` binds a
+  root-trusted TLS link to one meter's certificate (an empty name is
+  refused). TLS links now count as a secure transport. With `psk_file` on a
+  meter that still accepts cleartext, `refuse_cleartext_pin` makes every
+  values and archive run fail, so leave it off there.
+- `kmb-sync check`, and the service at start, warn when the PIN crosses
+  the link in cleartext: always without `psk_file` or `tls`, and with
+  `psk_file` unless `require_encryption` or `refuse_cleartext_pin` is set,
+  since a meter that accepts cleartext is read without the envelope. They
+  also warn when `tls_root` would accept another meter's certificate, and
+  when `byte_timeout` is above the 60 s limit for a whole reply frame,
+  where lost replies are no longer retried.
+- The example values jobs allow 45 s: since kmb-tokio 1.2.1 a lost
+  description or values reply is retried only after one `byte_timeout` of
+  quiet, so a values job's `timeout` must exceed twice the `byte_timeout`.
+  The example clock jobs were raised to 45 s as well, for headroom only;
+  clock reads are not retried.
+
+### Build
+
+- `jiff` 0.2.46 at least, the version the duration parser was checked with.
+- The Audit workflow also fails on unsound and yanked crates and can be
+  started by hand.
+
+### Documentation
+
+- The 1.3.3, 1.3.4 and 1.3.5 entries carry corrections: the advisories
+  1.3.3 left open, the LB feeder and UTF-8 names that CP1252 changes, and
+  the other duration forms 1.3.5 refuses.
+
 ## [1.3.5] - 2026-11-22
 
 ### `kmb-sync`
@@ -21,8 +72,8 @@ first released with. The format follows
 - Correction: other forms humantime took are refused too: a bare `"0"`
   (write `"0s"`), units out of order or repeated (`"30m 1h"`, `"1s 1s"`),
   fractional days or weeks (`"1.5d"`), digit groups (`"1 000s"`) and day or
-  week counts above about 20,000 years. ISO 8601 forms such as `"PT15M"` are newly
-  accepted.
+  week counts above about 20,000 years. ISO 8601 forms such as `"PT15M"`
+  are newly accepted.
 - `kmb-sync check` prints a job interval of a day or more in hours, such
   as `every 24h` instead of `every 1day`.
 
@@ -216,6 +267,7 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.4.0]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.0
 [1.3.5]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.5
 [1.3.4]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.4
 [1.3.3]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.3
