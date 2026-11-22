@@ -590,6 +590,15 @@ impl Config {
                     d.name
                 ));
             }
+            if d.byte_timeout >= kmb_tokio::REPLY_TIMEOUT {
+                out.push(format!(
+                    "device {:?}: byte_timeout {:?} has no effect at or above the {:?} limit for \
+                     a whole reply frame",
+                    d.name,
+                    d.byte_timeout,
+                    kmb_tokio::REPLY_TIMEOUT
+                ));
+            }
             if d.tls && d.tls_root.is_some() && d.tls_common_name.is_none() {
                 out.push(format!(
                     "device {:?}: tls_root accepts any certificate the CA signed, also another \
@@ -1095,6 +1104,26 @@ every = "1h"
                 .unwrap_err()
                 .contains("tls_common_name needs tls = true and tls_root")
         );
+    }
+
+    #[test]
+    fn byte_timeout_at_the_frame_limit_warning() {
+        let warned = |extra: &str| {
+            with_device(extra)
+                .warnings()
+                .iter()
+                .any(|w| w.contains("byte_timeout"))
+        };
+        assert_eq!(
+            with_device("byte_timeout = \"90s\"").warnings(),
+            [
+                "device \"station-a\": byte_timeout 90s has no effect at or above the 60s limit \
+                 for a whole reply frame"
+            ]
+        );
+        assert!(warned("byte_timeout = \"60s\""));
+        assert!(!warned("byte_timeout = \"59s\""));
+        assert!(!warned(""));
     }
 
     #[test]
