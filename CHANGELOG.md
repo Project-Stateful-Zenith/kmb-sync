@@ -7,6 +7,20 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.5] - 2026-11-22
+
+### `kmb-sync`
+
+- Changed: durations in the configuration are parsed with jiff instead of
+  humantime, which is unmaintained (RUSTSEC-2026-0542). The documented
+  units `ms`, `s`, `m`, `h` and `d`, combinations such as `"1h 30m"` or
+  `"1h30m"`, and `w` parse to the same values as before. Months and years
+  (`"1M"`, `"1y"`), which were never documented and which humantime read as
+  30.44 and 365.25 days, are now refused by `kmb-sync check` and at start;
+  write them in days instead.
+- `kmb-sync check` prints a job interval of a day or more in hours, such
+  as `every 24h` instead of `every 1day`.
+
 ## [1.3.4] - 2026-11-22
 
 ### Security
@@ -179,6 +193,7 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.3.5]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.5
 [1.3.4]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.4
 [1.3.3]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.3
 [1.3.2]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.2
