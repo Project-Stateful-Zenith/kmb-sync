@@ -6,6 +6,7 @@ on:
   pull_request:
   schedule:
     - cron: "17 6 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,4 +19,4 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
-      - run: cargo audit
+      - run: cargo audit --deny unsound --deny yanked

@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-jiff = "0.2.38"
+jiff = "0.2.46"
 kmb.workspace = true
 thiserror = "2.0.21"
 tiberius = { version = "0.13.0", default-features = false, features = ["tds73", "rustls", "time"] }

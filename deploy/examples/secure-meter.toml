@@ -8,14 +8,18 @@ host = "203.0.113.61"
 tls = true
 tls_root = "047fb25bacb2542392ffc4a2888d507a6f46bf61cc45b27758f52be6a607ef5c14fa8799b23b0b6e1560b204a8362b47498285731e7d3e043ef2996eafdbe7bac1"
 tls_pins = ["EF:71:44:33:B2:78:8A:AC:D7:C1:10:F1:2F:DB:2D:5A:48:A4:55:56:66:20:57:89:2A:3E:5B:04:B3:AC:E1:F0"]
+tls_common_name = "secure-feeder"
 credentials_file = "/etc/kmb-sync/secure-feeder.cred"
+refuse_cleartext_pin = true
 path = ["Demo", "Secure Feeder"]
 
 [[device]]
 name = "psk-meter"
 host = "203.0.113.62"
 psk_file = "/etc/kmb-sync/psk-meter.psk"
+require_encryption = true
 credentials_file = "/etc/kmb-sync/psk-meter.cred"
+refuse_cleartext_pin = true
 connect_timeout = "8s"
 byte_timeout = "15s"
 path = ["Demo", "PSK Meter"]
@@ -38,5 +42,5 @@ max_size = "3MiB"
 device = "psk-meter"
 kind = "clock"
 every = "1h"
-timeout = "20s"
+timeout = "45s"
 adjust_above = "3s"

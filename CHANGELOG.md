@@ -7,6 +7,57 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-22
+
+### `kmb-sync`
+
+- Fixed: the reconnect after a lost meter connection (1.3.3) opened the new
+  connection while the old one was still open, so a meter or gateway that
+  serves one connection at a time never answered it. The old connection is
+  now closed first.
+- Fixed: a failed reconnect is tried once more after 1 s; if that fails
+  too, the remaining archives of the run are reported as not attempted, in
+  one run error and on the status page, instead of each trying to connect.
+  Before, one run could trip the device's connect lockout. A shutdown
+  during the pause skips the second attempt, and a reconnect that needed
+  it is logged.
+- Fixed: a run also reconnects when the meter closed the connection or the
+  socket failed, not only after a timeout, and the ENVIS path reconnects
+  before it reads the Config description again.
+- New `[[device]]` options, all off by default: `require_encryption` refuses
+  a meter that answers a PSK device in cleartext (only for meters set to
+  refuse cleartext requests; a meter with a key that still accepts
+  cleartext fails at identify), `refuse_cleartext_pin` keeps the PIN off
+  links without the envelope or TLS, and `tls_common_name` binds a
+  root-trusted TLS link to one meter's certificate (an empty name is
+  refused). TLS links now count as a secure transport. With `psk_file` on a
+  meter that still accepts cleartext, `refuse_cleartext_pin` makes every
+  values and archive run fail, so leave it off there.
+- `kmb-sync check`, and the service at start, warn when the PIN crosses
+  the link in cleartext: always without `psk_file` or `tls`, and with
+  `psk_file` unless `require_encryption` or `refuse_cleartext_pin` is set,
+  since a meter that accepts cleartext is read without the envelope. They
+  also warn when `tls_root` would accept another meter's certificate, and
+  when `byte_timeout` is above the 60 s limit for a whole reply frame,
+  where lost replies are no longer retried.
+- The example values jobs allow 45 s: since kmb-tokio 1.2.1 a lost
+  description or values reply is retried only after one `byte_timeout` of
+  quiet, so a values job's `timeout` must exceed twice the `byte_timeout`.
+  The example clock jobs were raised to 45 s as well, for headroom only;
+  clock reads are not retried.
+
+### Build
+
+- `jiff` 0.2.46 at least, the version the duration parser was checked with.
+- The Audit workflow also fails on unsound and yanked crates and can be
+  started by hand.
+
+### Documentation
+
+- The 1.3.3, 1.3.4 and 1.3.5 entries carry corrections: the advisories
+  1.3.3 left open, the LB feeder and UTF-8 names that CP1252 changes, and
+  the other duration forms 1.3.5 refuses.
+
 ## [1.3.5] - 2026-11-22
 
 ### `kmb-sync`
@@ -18,6 +69,11 @@ first released with. The format follows
   (`"1M"`, `"1y"`), which were never documented and which humantime read as
   30.44 and 365.25 days, are now refused by `kmb-sync check` and at start;
   write them in days instead.
+- Correction: other forms humantime took are refused too: a bare `"0"`
+  (write `"0s"`), units out of order or repeated (`"30m 1h"`, `"1s 1s"`),
+  fractional days or weeks (`"1.5d"`), digit groups (`"1 000s"`) and day or
+  week counts above about 20,000 years. ISO 8601 forms such as `"PT15M"`
+  are newly accepted.
 - `kmb-sync check` prints a job interval of a day or more in hours, such
   as `every 24h` instead of `every 1day`.
 
@@ -25,18 +81,25 @@ first released with. The format follows
 
 ### Security
 
-- The 1.3.3 entry said the dependencies were past RUSTSEC-2026-0346 to
-  0349, 0382, 0385 and 0386. That was true of zenith-kmb's lockfile, not
-  of this one: kmb-sync 1.3.3 still locked rustls 0.23.45, ctutils 0.4.3
-  and webpki-roots 1.0.9. This release fixes that.
+- Correction: the 1.3.3 entry said the dependencies were past
+  RUSTSEC-2026-0346 to 0349, 0382, 0385 and 0386. That was true of
+  zenith-kmb's lockfile, not of this one. 1.3.3 did fix 0382
+  (rustls-webpki) and 0386 (tokio), but still locked rustls 0.23.45 (0346
+  to 0349), ctutils 0.4.3 (0385), webpki-roots 1.0.9 (0381),
+  libsqlite3-sys 0.38.2 (0459) and rustix 1.1.5 (0486). This release fixes
+  all of them.
 - rustls 0.23.46 (RUSTSEC-2026-0346 to 0349), used for the ENVIS
   connection and for KMB over TLS.
 - ctutils 0.4.8 (RUSTSEC-2026-0385), webpki-roots 1.0.12
-  (RUSTSEC-2026-0381/0382) and rustix 1.1.6 (RUSTSEC-2026-0486).
+  (RUSTSEC-2026-0381) and rustix 1.1.6 (RUSTSEC-2026-0486).
 - rusqlite 0.43 with libsqlite3-sys 0.40, whose bundled SQLite is past
   CVE-2026-119375 (RUSTSEC-2026-0459). The local store and its migrations
   are unchanged.
-- CI runs `cargo audit` on every push, on pull requests and weekly.
+- CI runs `cargo audit` on pushes to `main`, on pull requests and weekly.
+  It fails on vulnerabilities; unmaintained crates only warn.
+- Correction: at release this entry gave webpki-roots as 0381/0382 and
+  said the audit ran on every push and failed on every advisory; the
+  lines above are corrected.
 
 ### Build
 
@@ -47,6 +110,9 @@ first released with. The format follows
 
 ### Dependencies
 
+- Correction: the advisory list below is wrong for this release; see 1.3.4
+  for what 1.3.3 left open. The CP1252 note is incomplete: see the
+  correction after it.
 - `kmb` and `kmb-tokio` 1.2.1 (from 1.1.3), with their security fixes:
   replies must answer the request, archive downloads and replies are
   bounded, each reply frame has a time limit, and rustls-webpki 0.103.17
@@ -58,6 +124,14 @@ first released with. The format follows
   to read as `�` and now reads correctly. With ENVIS, the station and
   measurement names come from the notebook, so such a meter is written to
   a new ENVIS object under the corrected name; ASCII names are unchanged.
+- Correction: LB feeder measurement names (`<module>.<feeder>`) are decoded
+  the same way and change too. Only CP1252 bytes read correctly now; a name
+  the meter stores as UTF-8 read correctly before and now reads as
+  `AbgÃ¤nge`, and other code pages such as CP1250 read wrongly in both.
+  Every changed name gets a new ENVIS object or measurement, whose archive
+  is downloaded again from `start_from`. kmb-sync finds ENVIS objects by
+  name, so renaming the old ones to the new name before upgrading should
+  keep one history; this has not been tested against ENVIS.
 
 ### `kmb-sync`
 
@@ -193,6 +267,7 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.4.0]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.0
 [1.3.5]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.5
 [1.3.4]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.4
 [1.3.3]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.3
