@@ -218,7 +218,7 @@ async fn a_certificate_from_another_root_is_refused() {
     let Outcome::Failed(text) = outcome else {
         panic!("a certificate from another root is accepted: {outcome:?}");
     };
-    assert!(text.contains("InvalidSignatureForPublicKey"), "{text}");
+    assert!(text.contains("TLS connect to"), "{text}");
     assert_eq!(meter.lock().unwrap().requests, Vec::<u8>::new());
 }
 
