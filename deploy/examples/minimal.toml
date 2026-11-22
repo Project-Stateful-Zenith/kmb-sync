@@ -26,10 +26,10 @@ device = "harbor-gate"
 kind = "values"
 set = "ActData"
 every = "1m"
-timeout = "20s"
+timeout = "45s"
 
 [[job]]
 device = "harbor-gate"
 kind = "clock"
 every = "1h"
-timeout = "20s"
+timeout = "45s"
