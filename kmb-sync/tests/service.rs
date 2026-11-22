@@ -780,6 +780,36 @@ async fn contact_counts_only_once_the_meter_answered() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_run_counts_as_contact() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    meter.lock().unwrap().records = vec![record(minute(0), 1.0)];
+    let port = start_meter(meter).await;
+    let dir = tempfile::tempdir().unwrap();
+    let service = Service::new(config(&dir.path().join("t.db"), port, "")).unwrap();
+    let before = kmb_sync::clock::now_ms();
+    run(&service, "m-archive-1").await;
+    let st = service.devices["m"].snapshot();
+    assert!(st.last_ok.is_some_and(|t| t >= before), "{st:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reconnect_counts_as_contact() {
+    let meter = two_archive_meter(1);
+    let port = start_meter_one_connection_at_a_time(meter.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    with_archives(&mut c, "[\"Elmeter\", \"Main\"]");
+    let silence = kmb_sync::clock::ms(c.devices[0].byte_timeout);
+    let service = Service::new(c).unwrap();
+    let before = kmb_sync::clock::now_ms();
+    run(&service, "m-archive-1").await;
+    assert_eq!(identifies(&meter), 2);
+    let st = service.devices["m"].snapshot();
+    let reconnected_after = before.saturating_add(silence).saturating_sub(100);
+    assert!(st.last_ok.is_some_and(|t| t >= reconnected_after), "{st:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_run_that_fails_reading_the_config_shows_in_the_device_status() {
     let meter = Arc::new(Mutex::new(Meter::default()));
     meter.lock().unwrap().silent_value_reads = 0..1;
@@ -795,6 +825,66 @@ async fn a_run_that_fails_reading_the_config_shows_in_the_device_status() {
     assert!(text.starts_with("reading Config: "), "{text}");
     let st = service.devices["m"].snapshot();
     assert_eq!(st.last_error.as_deref(), Some(text.as_str()), "{st:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_answer_from_the_meter_clears_the_device_error() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    meter.lock().unwrap().silent_value_reads = 0..1;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    accept_loop(listener, meter.clone(), true);
+    let dir = tempfile::tempdir().unwrap();
+    let service = Service::new(config(&dir.path().join("t.db"), port, "")).unwrap();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    assert!(matches!(
+        service.run_once(&slot).await.unwrap().1,
+        Outcome::Failed(_)
+    ));
+    assert!(service.devices["m"].snapshot().last_error.is_some());
+    run(&service, "m-archive-1").await;
+    let st = service.devices["m"].snapshot();
+    assert_eq!(st.last_error, None, "{st:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_identify_after_a_failed_run_clears_the_device_error() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    meter.lock().unwrap().silent_value_reads = 0..1;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    accept_loop(listener, meter.clone(), true);
+    let dir = tempfile::tempdir().unwrap();
+    let service = Service::new(config(&dir.path().join("t.db"), port, "")).unwrap();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    assert!(matches!(
+        service.run_once(&slot).await.unwrap().1,
+        Outcome::Failed(_)
+    ));
+    let device = service.devices["m"].clone();
+    assert!(device.snapshot().last_error.is_some());
+    service.identify(&device).await.unwrap();
+    let st = device.snapshot();
+    assert_eq!(st.last_error, None, "{st:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_that_hits_the_job_timeout_shows_in_the_device_status() {
+    let meter = two_archive_meter(1);
+    let port = start_meter(meter).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    c.jobs[0].timeout = std::time::Duration::from_millis(500);
+    let service = Service::new(c).unwrap();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    let outcome = service.run_once(&slot).await.unwrap().1;
+    assert!(matches!(outcome, Outcome::Timeout), "{outcome:?}");
+    let st = service.devices["m"].snapshot();
+    assert_eq!(
+        st.last_error.as_deref(),
+        Some("no result within 500ms"),
+        "{st:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

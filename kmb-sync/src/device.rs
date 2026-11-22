@@ -328,6 +328,7 @@ impl DeviceSlot {
     pub fn answered(&self, identity: IdentitySummary) {
         self.update(|s| {
             s.last_ok = Some(clock::now_ms());
+            s.last_error = None;
             s.identity = Some(identity);
         });
     }
