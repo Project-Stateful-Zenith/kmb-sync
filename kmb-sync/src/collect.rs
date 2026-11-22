@@ -259,27 +259,30 @@ async fn archive_job(
         cx.resume_after,
     );
     let mut reconnect_first = false;
-    for &archive in &list {
+    let mut failed = 0_usize;
+    for (at, &archive) in list.iter().enumerate() {
+        if let Err(e) = reconnect_if(cx, client, described, &mut reconnect_first).await {
+            let rest = list.get(at..).unwrap_or_default();
+            failed = failed.saturating_add(rest.len());
+            out.errors
+                .push(format!("{} not attempted: {e:#}", archive_names(rest)));
+            break;
+        }
         let before = out.inserted;
         let mut newest = None;
-        let r = match reconnect_if(cx, client, described, &mut reconnect_first).await {
-            Ok(()) => {
-                sync_archive(
-                    cx,
-                    client,
-                    described,
-                    measurement,
-                    archive,
-                    start_from,
-                    &mut out,
-                    envis.as_mut(),
-                    &mut newest,
-                )
-                .await
-            }
-            Err(e) => Err(e),
-        };
-        if r.as_ref().is_err_and(reply_timed_out) {
+        let r = sync_archive(
+            cx,
+            client,
+            described,
+            measurement,
+            archive,
+            start_from,
+            &mut out,
+            envis.as_mut(),
+            &mut newest,
+        )
+        .await;
+        if r.as_ref().is_err_and(connection_lost) {
             reconnect_first = true;
         }
         let error = r.as_ref().err().map(|e| format!("{e:#}"));
@@ -293,13 +296,14 @@ async fn archive_job(
             {
                 run.conn.mark_broken();
             }
+            failed = failed.saturating_add(1);
             out.errors.push(format!("archive {archive}: {e:#}"));
         }
         if cx.cancel.is_cancelled() || out.limited {
             break;
         }
     }
-    if !out.errors.is_empty() && out.errors.len() == list.len() {
+    if !out.errors.is_empty() && failed == list.len() {
         bail!("{}", out.errors.join("; "));
     }
     if let Some(run) = envis {
@@ -319,13 +323,30 @@ fn connection_broken(e: &anyhow::Error) -> bool {
     })
 }
 
-fn reply_timed_out(e: &anyhow::Error) -> bool {
+const fn needs_reconnect(e: &kmb_tokio::Error) -> bool {
+    matches!(
+        e,
+        kmb_tokio::Error::Timeout | kmb_tokio::Error::Closed | kmb_tokio::Error::Io(_)
+    )
+}
+
+fn connection_lost(e: &anyhow::Error) -> bool {
     e.chain().any(|c| {
-        matches!(
-            c.downcast_ref::<kmb_tokio::Error>(),
-            Some(kmb_tokio::Error::Timeout)
-        )
+        c.downcast_ref::<kmb_tokio::Error>()
+            .is_some_and(needs_reconnect)
     })
+}
+
+fn archive_names(archives: &[u8]) -> String {
+    let named: Vec<String> = archives
+        .iter()
+        .map(|&a| format!("{a} ({})", archive_name(a).unwrap_or("?")))
+        .collect();
+    format!("archives {}", named.join(", "))
+}
+
+fn disconnected(address: u8) -> MeterClient {
+    MeterClient::new(Box::new(tokio::io::empty()), address)
 }
 
 async fn reconnect_if(
@@ -337,11 +358,15 @@ async fn reconnect_if(
     if !*pending {
         return Ok(());
     }
+    drop(std::mem::replace(
+        client,
+        disconnected(cx.device.config.address),
+    ));
     let mut fresh = cx
         .device
         .connect(cx.traffic)
         .await
-        .context("reconnect after a timeout")?;
+        .context("reconnect after a lost connection")?;
     let id = fresh
         .identify()
         .await
@@ -427,6 +452,8 @@ async fn envis_run<'s>(
         .await;
     // a reconfigured meter may have new archive layouts: describe it again
     if read.is_err() || cfg_time(&described.config) != before {
+        let mut lost = read.as_ref().is_err_and(needs_reconnect);
+        reconnect_if(cx, client, described, &mut lost).await?;
         described.config = client
             .read_description(DataSet::Config)
             .await

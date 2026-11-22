@@ -71,11 +71,19 @@ struct Meter {
     cfg_time: u64,
     two_archives: bool,
     silent_reads: usize,
+    value_reads: usize,
+    silent_value_reads: std::ops::Range<usize>,
 }
 
 impl Meter {
     fn time(&self, i: usize) -> u64 {
         u64::from_be_bytes(self.records[i][4..12].try_into().unwrap())
+    }
+
+    fn value_read_is_silent(&mut self) -> bool {
+        let read = self.value_reads;
+        self.value_reads = read.saturating_add(1);
+        self.silent_value_reads.contains(&read)
     }
 
     fn answer(&mut self, req: &Frame) -> Vec<Frame> {
@@ -86,6 +94,7 @@ impl Meter {
             1 => data(hex(IDENTIFY)),
             17 => data(hex(RTC)),
             18 => data(vec![0]),
+            112 | 114 if req.payload[8] == 2 && self.value_read_is_silent() => Vec::new(),
             112 | 114 => data(match req.payload[8] {
                 0 => hex(PHASE0),
                 1 => hex(PHASE1),
@@ -148,35 +157,91 @@ impl Meter {
     }
 }
 
+async fn serve_connection(
+    mut io: tokio::net::TcpStream,
+    meter: Arc<Mutex<Meter>>,
+    close_when_silent: bool,
+) {
+    let mut dec = FrameDecoder::new();
+    let mut buf = [0; 4096];
+    loop {
+        let n = match io.read(&mut buf).await {
+            Ok(0) | Err(_) => return,
+            Ok(n) => n,
+        };
+        dec.push(&buf[..n]);
+        while let Some(Ok(req)) = dec.next_frame() {
+            let replies = meter.lock().unwrap().answer(&req);
+            if replies.is_empty() && close_when_silent {
+                return;
+            }
+            for r in replies {
+                io.write_all(&r.encode().unwrap()).await.unwrap();
+            }
+        }
+    }
+}
+
+fn accept_loop(
+    listener: TcpListener,
+    meter: Arc<Mutex<Meter>>,
+    close_when_silent: bool,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            let Ok((io, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(serve_connection(io, meter.clone(), close_when_silent));
+        }
+    })
+}
+
 async fn start_meter(meter: Arc<Mutex<Meter>>) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
+    accept_loop(listener, meter, false);
+    port
+}
+
+async fn start_meter_one_connection_at_a_time(meter: Arc<Mutex<Meter>>) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
-        loop {
-            let Ok((mut io, _)) = listener.accept().await else {
-                return;
-            };
-            let meter = meter.clone();
-            tokio::spawn(async move {
-                let mut dec = FrameDecoder::new();
-                let mut buf = [0; 4096];
-                loop {
-                    let n = match io.read(&mut buf).await {
-                        Ok(0) | Err(_) => return,
-                        Ok(n) => n,
-                    };
-                    dec.push(&buf[..n]);
-                    while let Some(Ok(req)) = dec.next_frame() {
-                        let replies = meter.lock().unwrap().answer(&req);
-                        for r in replies {
-                            io.write_all(&r.encode().unwrap()).await.unwrap();
-                        }
-                    }
-                }
-            });
+        while let Ok((io, _)) = listener.accept().await {
+            serve_connection(io, meter.clone(), false).await;
         }
     });
     port
+}
+
+fn two_archive_meter(silent_reads: usize) -> Arc<Mutex<Meter>> {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    {
+        let mut m = meter.lock().unwrap();
+        m.records = (0..3).map(|i| record(minute(i), 1.0)).collect();
+        (m.two_archives, m.silent_reads) = (true, silent_reads);
+    }
+    meter
+}
+
+fn with_archives(c: &mut Config, list: &str) {
+    if let kmb_sync::config::Task::Archive { archives, .. } = &mut c.jobs[0].task {
+        *archives = toml::from_str::<toml::Table>(&format!("a = {list}")).unwrap()["a"]
+            .clone()
+            .try_into()
+            .unwrap();
+    }
+}
+
+fn identifies(meter: &Mutex<Meter>) -> usize {
+    meter
+        .lock()
+        .unwrap()
+        .requests
+        .iter()
+        .map(|&r| usize::from(r == 1))
+        .sum()
 }
 
 fn config(db: &std::path::Path, port: u16, extra: &str) -> Config {
@@ -316,6 +381,102 @@ async fn a_timed_out_archive_does_not_stop_the_next_one() {
         .map(|&r| usize::from(r == 1))
         .sum::<usize>();
     assert_eq!(identifies, 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_meter_serving_one_connection_at_a_time_answers_after_the_reconnect() {
+    let meter = two_archive_meter(1);
+    let port = start_meter_one_connection_at_a_time(meter.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    with_archives(&mut c, "[\"Elmeter\", \"Main\"]");
+    let service = Service::new(c).unwrap();
+    let s = run(&service, "m-archive-1").await;
+    assert_eq!(s.inserted, 3, "{s:?}");
+    assert_eq!(s.errors.len(), 1, "{s:?}");
+    assert!(s.errors[0].starts_with("archive 6"), "{s:?}");
+    assert_eq!(identifies(&meter), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_meter_that_closes_the_connection_is_reconnected() {
+    let meter = two_archive_meter(1);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    accept_loop(listener, meter.clone(), true);
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    with_archives(&mut c, "[\"Elmeter\", \"Main\"]");
+    let service = Service::new(c).unwrap();
+    let s = run(&service, "m-archive-1").await;
+    assert_eq!(s.inserted, 3, "{s:?}");
+    assert_eq!(s.errors.len(), 1, "{s:?}");
+    assert!(s.errors[0].contains("connection closed"), "{s:?}");
+    assert_eq!(identifies(&meter), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_reconnect_ends_the_run_without_locking_the_device() {
+    let meter = two_archive_meter(1);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepting = accept_loop(listener, meter.clone(), false);
+    let watched = meter.clone();
+    tokio::spawn(async move {
+        while watched.lock().unwrap().silent_reads > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        accepting.abort();
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    with_archives(&mut c, "[6, 0, 1, 2, 3, 4, 5, 14, 15, 16, 17, 25, 9]");
+    let service = Service::new(c).unwrap();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    let Outcome::Failed(text) = service.run_once(&slot).await.unwrap().1 else {
+        panic!("a run in which no archive succeeded fails");
+    };
+    let entries: Vec<&str> = text.split("; ").collect();
+    assert!(entries[0].starts_with("archive 6: "), "{text}");
+    assert!(entries[0].contains("reply timed out"), "{text}");
+    assert_eq!(text.matches("not attempted").count(), 1, "{text}");
+    assert!(
+        entries[1].starts_with("archives 0 (Main), 1 (") && entries[1].contains(", 9 ("),
+        "{text}"
+    );
+    let st = service.devices["m"].snapshot();
+    assert_eq!(st.connect_failures, 1, "{st:?}");
+    assert!(st.locked_until.is_none(), "{st:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn envis_config_is_read_again_on_a_new_connection_after_a_timeout() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    {
+        let mut m = meter.lock().unwrap();
+        (m.cfg_time, m.silent_value_reads) = (1000, 1..1 + kmb_tokio::PAGE_ATTEMPTS);
+    }
+    let port = start_meter(meter.clone()).await;
+    let unreachable = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let password = dir.path().join("pw");
+    std::fs::write(&password, "x\n").unwrap();
+    let envis = format!(
+        "\n[envis]\nhost = \"127.0.0.1\"\nport = {unreachable}\ndatabase = \"d\"\nuser = \"u\"\n\
+         password_file = \"{}\"\ntime_zone = \"UTC\"\n",
+        password.display()
+    );
+    let service = Service::new(config(&dir.path().join("t.db"), port, &envis)).unwrap();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    let Outcome::Failed(text) = service.run_once(&slot).await.unwrap().1 else {
+        panic!("ENVIS is unreachable");
+    };
+    assert!(!text.contains("reconnect"), "{text}");
+    assert!(!text.contains("reading Config"), "{text}");
+    assert_eq!(identifies(&meter), 2, "{text}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
