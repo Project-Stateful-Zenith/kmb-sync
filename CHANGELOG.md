@@ -14,9 +14,13 @@ first released with. The format follows
 - Fixed: a run that failed at identify or while reading the descriptions,
   or that hit the job's `timeout`, set the job's error but not the
   device's. `kmb-sync status`, `kmb-sync devices`, `/api/devices` and
-  `/api/stations` now carry it as the device's `last_error` too.
+  `/api/stations` now show the run's error text as the device's
+  `last_error` too; for a timeout that is `no result within` the job's
+  `timeout`.
 - Fixed: the device's `last_error` was never cleared and stayed until the
-  service restarted. It is cleared when the meter answers an identify.
+  service restarted. It is cleared when the meter answers an identify,
+  from any job or request. A job that keeps failing shows in the job's
+  own `last_error`.
 - Fixed: the device's last contact time (`last_ok`) was set by the TCP
   connect. A gateway that accepts connections while its meter stays
   silent no longer refreshes it; it is set when the meter answered an
