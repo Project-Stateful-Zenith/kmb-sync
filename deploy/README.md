@@ -98,7 +98,7 @@ should not be visible.
 | `tls_root` | none | public key of the root CA that signed the meter's certificate: an uncompressed P-256 point in hex (`04`, then X and Y) |
 | `tls_pins` | `[]` | SHA-256 fingerprints of meter certificates to accept, hex with or without `:` |
 | `connect_timeout` | `"5s"` | time allowed to open the connection |
-| `byte_timeout` | `"10s"` | time allowed between bytes of a reply |
+| `byte_timeout` | `"10s"` | time allowed between bytes of a reply; a whole reply frame must also arrive within 60 s. After a timeout the run reconnects before the next archive |
 | `packed` | `6800` | packet size written into the ENVIS device URL (only with `[envis]`) |
 | `envis_url` | built from host, port, address and `packed` | the device URL stored in ENVIS, when it must match an existing one exactly |
 
@@ -187,6 +187,10 @@ stay in kmb-sync's own database only.
 | `trust_cert` | `false` | accept the server's certificate without checking it, for self-signed servers |
 | `time_zone` | the host's | time zone the archive periods are cut in (IANA name, e.g. `"UTC"`) |
 | `allow_new_definitions` | `false` | store a record layout ENVIS has not seen before. Off, such archives are refused until ENVIS has stored that meter once |
+
+ENVIS object and measurement names come from the meter's notebook
+(the first and second 32 bytes), decoded as CP1252. A name ENVIS does not
+know yet gets a new object.
 
 The login needs to read and write the archive tables only; it should not
 be able to change the schema. GO, Modbus Master, Avg, H2M and LB2 archives
