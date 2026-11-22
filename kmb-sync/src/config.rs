@@ -734,7 +734,10 @@ pub fn read_secret(path: &Path) -> Result<String> {
 }
 
 fn check_link_protections(d: &Device) -> Result<()> {
-    if d.tls_common_name.as_deref().is_some_and(str::is_empty) {
+    if d.tls_common_name
+        .as_deref()
+        .is_some_and(|name| name.trim().is_empty())
+    {
         bail!("device {:?}: tls_common_name is empty", d.name);
     }
     if d.tls_common_name.is_some() && !(d.tls && d.tls_root.is_some()) {
@@ -1112,8 +1115,13 @@ every = "1h"
                 .unwrap_err()
                 .contains("tls_common_name needs tls = true and tls_root")
         );
-        let mut empty = with_device(&format!("tls = true\ntls_common_name = \"\"\n{root}"));
-        assert!(format!("{:#}", empty.check().unwrap_err()).contains("tls_common_name is empty"));
+        for name in ["", " "] {
+            let mut empty =
+                with_device(&format!("tls = true\ntls_common_name = \"{name}\"\n{root}"));
+            assert!(
+                format!("{:#}", empty.check().unwrap_err()).contains("tls_common_name is empty")
+            );
+        }
     }
 
     #[test]
