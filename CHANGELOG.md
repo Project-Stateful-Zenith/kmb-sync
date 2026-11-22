@@ -7,6 +7,29 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2026-11-22
+
+### Dependencies
+
+- `kmb` and `kmb-tokio` 1.2.1 (from 1.1.3), with their security fixes:
+  replies must answer the request, archive downloads and replies are
+  bounded, each reply frame has a time limit, and rustls-webpki 0.103.17
+  and tokio 1.54.1 are past RUSTSEC-2026-0346 to 0349, 0382, 0385 and 0386.
+  A late reply after a timeout can no longer be taken for the next
+  request's answer.
+- Names read from the meter (notebook, identify, archive definitions) are
+  now decoded as CP1252. A name with a non-ASCII character such as `ä` used
+  to read as `�` and now reads correctly. With ENVIS, the station and
+  measurement names come from the notebook, so such a meter is written to
+  a new ENVIS object under the corrected name; ASCII names are unchanged.
+
+### `kmb-sync`
+
+- Fixed: after a request to the meter timed out, every later archive of the
+  same run failed with "a reply timed out and may still arrive; reconnect".
+  The run now reconnects before the next archive, checks that the same
+  meter answers, and goes on.
+
 ## [1.3.2] - 2026-11-09
 
 ### `kmb-envis`
@@ -134,6 +157,7 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.3.3]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.3
 [1.3.2]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.2
 [1.3.1]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.1
 [1.3.0]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.0
