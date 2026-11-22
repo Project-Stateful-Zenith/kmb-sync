@@ -9,7 +9,7 @@ license.workspace = true
 [dependencies]
 crc32fast = "1.5.2"
 kmb.workspace = true
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.43.0", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"

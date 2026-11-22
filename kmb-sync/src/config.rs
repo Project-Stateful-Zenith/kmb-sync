@@ -74,7 +74,7 @@ pub struct Service {
 }
 
 /// Shortest `run_log_rotate` accepted.
-pub const MIN_RUN_LOG_ROTATE: Duration = Duration::from_secs(24 * 3600);
+pub const MIN_RUN_LOG_ROTATE: Duration = Duration::from_hours(24);
 
 pub const DEFAULT_STATUS_LISTEN: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 8651);
@@ -103,7 +103,7 @@ const fn default_heartbeat() -> Duration {
 }
 
 const fn default_describe_every() -> Duration {
-    Duration::from_secs(6 * 3600)
+    Duration::from_hours(6)
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -505,7 +505,7 @@ impl Config {
             if j.timeout.is_zero() {
                 bail!("job {:?}: timeout must be above 0", j.name);
             }
-            if j.start_time.is_some() && j.every > Duration::from_secs(86_400) {
+            if j.start_time.is_some() && j.every > Duration::from_hours(24) {
                 bail!("job {:?}: start_time needs every of at most 24h", j.name);
             }
             if j.start_time.is_some() && j.anchor.is_some() {
@@ -783,7 +783,7 @@ every = "1h"
         assert_eq!(c.devices[0].port(), 2101);
         assert_eq!(c.devices[0].url(), "tcp://192.0.2.10:2101/1");
         assert_eq!(c.jobs[0].name, "station-a-archive-1");
-        assert_eq!(c.jobs[0].every, Duration::from_secs(900));
+        assert_eq!(c.jobs[0].every, Duration::from_mins(15));
         match &c.jobs[0].task {
             Task::Archive {
                 archives,
@@ -835,10 +835,7 @@ every = "1h"
             let mut c: Config = toml::from_str(&text).unwrap();
             c.check().map(|()| c.service.run_log_rotate)
         };
-        assert_eq!(
-            with("365d").unwrap(),
-            Some(Duration::from_secs(365 * 86_400))
-        );
+        assert_eq!(with("365d").unwrap(), Some(Duration::from_hours(365 * 24)));
         assert!(with("12h").is_err());
     }
 

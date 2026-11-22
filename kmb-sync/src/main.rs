@@ -147,7 +147,7 @@ fn main() -> Result<()> {
         Command::Jobs => client.print("GET", "/api/jobs"),
         Command::Status => client.status(),
         Command::Runs { job, limit } => {
-            let job = job.map(|j| format!("&job={j}")).unwrap_or_default();
+            let job = job.map_or_default(|j| format!("&job={j}"));
             client.print("GET", &format!("/api/runs?limit={limit}{job}"))
         }
         Command::Measurements => client.print("GET", "/api/measurements"),
@@ -659,8 +659,7 @@ impl ApiClient {
                 time(&d["last_ok"]),
                 d["last_error"]
                     .as_str()
-                    .map(|e| format!("  last error: {e}"))
-                    .unwrap_or_default(),
+                    .map_or_default(|e| format!("  last error: {e}")),
             )?;
         }
         Ok(())

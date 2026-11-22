@@ -336,7 +336,7 @@ impl<'a> Appender<'a> {
             .await
             .map_err(sql_err)?;
         Ok(match row {
-            Some(r) => col::<&[u8]>(&r, 0)?.map(<[u8]>::to_vec).unwrap_or_default(),
+            Some(r) => col::<&[u8]>(&r, 0)?.map_or_default(<[u8]>::to_vec),
             None => Vec::new(),
         })
     }
@@ -372,7 +372,7 @@ impl<'a> Appender<'a> {
             count: col::<i64>(&r, 4)?
                 .and_then(|c| u32::try_from(c).ok())
                 .unwrap_or(0),
-            index: col::<&[u8]>(&r, 5)?.map(decode_index).unwrap_or_default(),
+            index: col::<&[u8]>(&r, 5)?.map_or_default(decode_index),
         }))
     }
 

@@ -188,8 +188,7 @@ async fn packs(s: &Server, db: &str, meas: i32, arch: u8) -> Vec<Pack> {
                 rows: buf.chunks(12).map(<[u8]>::to_vec).collect(),
                 index: r
                     .get::<&[u8], _>(5)
-                    .map(decode_index)
-                    .unwrap_or_default()
+                    .map_or_default(decode_index)
                     .iter()
                     .map(|e| (e.row, e.time))
                     .collect(),
