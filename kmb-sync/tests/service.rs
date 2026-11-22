@@ -818,6 +818,25 @@ async fn an_answer_from_the_meter_clears_the_device_error() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_run_that_hits_the_job_timeout_shows_in_the_device_status() {
+    let meter = two_archive_meter(1);
+    let port = start_meter(meter).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    c.jobs[0].timeout = std::time::Duration::from_millis(500);
+    let service = Service::new(c).unwrap();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    let outcome = service.run_once(&slot).await.unwrap().1;
+    assert!(matches!(outcome, Outcome::Timeout), "{outcome:?}");
+    let st = service.devices["m"].snapshot();
+    assert_eq!(
+        st.last_error.as_deref(),
+        Some("no result within 500ms"),
+        "{st:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn api_requires_the_token_and_serves_records() {
     let meter = Arc::new(Mutex::new(Meter::default()));
     meter.lock().unwrap().records = (0..2).map(|i| record(minute(i), 230.0)).collect();

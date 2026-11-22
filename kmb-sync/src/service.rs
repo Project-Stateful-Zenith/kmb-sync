@@ -116,6 +116,15 @@ impl Outcome {
             Self::Cancelled => "cancelled",
         }
     }
+
+    fn detail(&self, timeout: Duration) -> Option<String> {
+        match self {
+            Self::Done(s) => s.detail(),
+            Self::Failed(e) => Some(e.clone()),
+            Self::Timeout => Some(format!("no result within {timeout:?}")),
+            Self::Cancelled => None,
+        }
+    }
 }
 
 pub struct Service {
@@ -213,12 +222,10 @@ impl Service {
         drop(session);
         let finished = clock::now_ms();
         let bytes = traffic.get();
-        let detail = match &outcome {
-            Outcome::Done(s) => s.detail(),
-            Outcome::Failed(e) => Some(e.clone()),
-            Outcome::Timeout => Some(format!("no result within {:?}", job.timeout)),
-            Outcome::Cancelled => None,
-        };
+        let detail = outcome.detail(job.timeout);
+        if matches!(outcome, Outcome::Timeout) {
+            device.update(|s| s.last_error.clone_from(&detail));
+        }
         let name = outcome.name();
         slot.update(|s| {
             s.running = false;
