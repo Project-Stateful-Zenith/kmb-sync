@@ -83,6 +83,15 @@ h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
 .name .u, .meta { color: var(--muted); font-size: 12px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta { font-family: var(--sans); }
 .name .u.warn { color: var(--warn); }
+.title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.badges { display: flex; gap: 4px; flex: none; }
+.badge { font-size: 10.5px; font-weight: 600; line-height: 16px; padding: 0 5px; border-radius: 4px; border: 1px solid currentColor; letter-spacing: 0.02em; cursor: default; }
+.badge.on { color: var(--up); background: color-mix(in oklab, var(--up) 10%, transparent); }
+.badge.off { color: var(--down); background: color-mix(in oklab, var(--down) 10%, transparent); text-decoration: line-through; text-decoration-thickness: 1.5px; }
+.badge.unknown { color: var(--faint); border-style: dashed; }
+.badge.warn { color: var(--warn); background: color-mix(in oklab, var(--warn) 10%, transparent); }
+.badge.icon { display: inline-flex; align-items: center; padding: 0 3px; }
+.badge.icon svg { width: 12px; height: 12px; }
 
 .status { min-width: 0; }
 .state { display: flex; align-items: center; gap: 8px; font-weight: 500; }
@@ -259,6 +268,7 @@ function bytes(n) {
   return (n / 1048576).toFixed(2) + " MiB";
 }
 function every(s) {
+  if (s < 60) return s + " s";
   if (s % 86400 === 0) return s / 86400 + " d";
   if (s % 3600 === 0) return s / 3600 + " h";
   if (s % 60 === 0) return s / 60 + " min";
@@ -349,10 +359,61 @@ function jobRow(st, job, multi) {
 
 function stationName(st) {
   return h("div", { class: "name" },
-    h("div", { class: "t", title: st.name }, st.name),
+    h("div", { class: "title" }, h("div", { class: "t", title: st.name }, st.name), stationBadges(st)),
     deviceLines(st),
     trafficLine(st),
     st.archives.length ? archiveToggle(st) : null);
+}
+
+function badge(label, on, title) {
+  const state = on == null ? "unknown" : on ? "on" : "off";
+  return h("span", { class: "badge " + state, role: "img", title, "aria-label": title }, label);
+}
+
+const CLOCK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 4.8V8l2.2 1.4"/></svg>';
+const CLOCK_OFF = CLOCK.replace("</svg>", '<path d="M2.5 13.5l11-11"/></svg>');
+
+function span(ms) {
+  return ms < 1000 ? ms + " ms" : every(ms / 1000);
+}
+
+function clockText(c) {
+  const plan = c.every_ms != null && c.adjust_above_ms != null
+    ? "checked every " + span(c.every_ms) + ", set to server time when off by more than " + span(c.adjust_above_ms)
+    : "";
+  return {
+    kept: ["on", "Clock sync: " + plan],
+    failing: ["warn", "Clock sync: " + plan + ", but the last clock run failed"],
+    paused: ["off", "Clock sync: off, the clock job that sets the clock is paused"],
+    read_only: ["off", "Clock sync: off, the clock is only read (set adjust_above to correct it)"],
+    none: ["off", "Clock sync: off, no enabled clock job"],
+  }[c.state] || ["off", "Clock sync: unknown"];
+}
+
+function clockBadge(st) {
+  const [cls, title] = clockText(st.clock || { state: "none" });
+  const b = h("span", { class: "badge icon " + cls, role: "img", title, "aria-label": title });
+  b.insertAdjacentHTML("beforeend", cls === "off" ? CLOCK_OFF : CLOCK);
+  return b;
+}
+
+const BADGES = {
+  tls: (st) => {
+    const tls = st.url.startsWith("tls://");
+    return badge("TLS", tls, tls ? "TLS: connection is encrypted" : "TLS: not used, plain TCP");
+  },
+  psk: (st) => {
+    const psk = st.identity ? st.identity.encrypted : null;
+    return badge("PSK", psk, psk == null
+      ? "PSK envelope: not known until the meter answers"
+      : psk ? "PSK envelope: in use on the last identify" : "PSK envelope: not used, the meter answered in cleartext");
+  },
+  clock: clockBadge,
+};
+
+function stationBadges(st) {
+  const list = (data.badges || Object.keys(BADGES)).filter((b) => BADGES[b]);
+  return list.length ? h("span", { class: "badges" }, list.map((b) => BADGES[b](st))) : null;
 }
 
 const CHEVRON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>';
@@ -393,7 +454,8 @@ function archiveToggle(st) {
     title: flag === "bad" ? "An archive failed in its last run" : flag ? "An archive is behind or missing" : null,
     onclick: () => { shown.has(st.name) ? shown.delete(st.name) : shown.add(st.name); render(); },
   }, flag ? dot(flag) : null,
-    h("span", {}, h("span", { class: "n" }, on), st.archives_known ? " of " + st.archives.length + " archives" : " archives"));
+    h("span", {}, h("span", { class: "n" }, on), st.archives_known ? " of " + (st.archives.length + (st.archives_hidden || 0)) + " archives" : " archives",
+      st.archives_hidden ? ", " + st.archives_hidden + " hidden" : null));
   b.insertAdjacentHTML("beforeend", CHEVRON);
   return b;
 }
@@ -476,7 +538,7 @@ function deviceLines(st) {
   const id = st.identity;
   const ident = id ? ["SN " + id.device_no, "FW " + id.firmware].join(" · ") : null;
   const clock = st.clock_offset_ms == null
-    ? h("div", { class: "u" }, st.jobs.some((j) => j.kind === "clock") ? "clock not read yet" : "clock not checked (no clock job)")
+    ? h("div", { class: "u" }, (st.clock && st.clock.state !== "none") || st.jobs.some((j) => j.kind === "clock") ? "clock not read yet" : "clock not checked (no clock job)")
     : h("div", { class: "u" + (drifted(st) ? " warn" : ""), title: "Meter clock minus server clock, from the last clock job" }, "clock " + drift(st.clock_offset_ms));
   return [h("div", { class: "u", title: st.url }, ip), ident ? h("div", { class: "u" }, ident) : null, clock];
 }
@@ -501,7 +563,7 @@ function render() {
   hideTip();
   const list = $("list");
   const stations = data.stations;
-  if (!stations.length) { list.replaceChildren(h("div", { class: "empty" }, "No devices configured.")); return; }
+  if (!stations.length) { list.replaceChildren(h("div", { class: "empty" }, data.stations_hidden ? "No stations shown." : "No devices configured.")); return; }
   const head = h("div", { class: "head" }, h("span", {}, "Station"), h("span", {}, "Status"), h("span", {}, "Recent runs"), h("span", {}, "Next sync"));
   const rows = stations.map((st) => {
     const multi = st.jobs.length > 1;
@@ -509,7 +571,7 @@ function render() {
       h("div", { class: "station-name" }, stationName(st)),
       st.jobs.length ? st.jobs.map((j) => jobRow(st, j, multi))
         : h("div", { class: "job" }, stationName(st),
-            h("div", { class: "status" }, h("div", { class: "state idle" }, dot("idle"), h("span", { class: "label" }, "No jobs")))),
+            h("div", { class: "status" }, h("div", { class: "state idle" }, dot("idle"), h("span", { class: "label" }, st.jobs_hidden ? "No jobs shown" : "No jobs")))),
       deviceError(st),
       shown.has(st.name) && st.archives.length ? archivePanel(st) : null);
   });
