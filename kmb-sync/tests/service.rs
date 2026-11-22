@@ -255,6 +255,18 @@ async fn start_meter_one_connection_at_a_time(meter: Arc<Mutex<Meter>>) -> u16 {
     port
 }
 
+async fn start_gateway_without_a_meter() -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut io, _)) = listener.accept().await {
+            let mut request = [0; 64];
+            assert!(io.read(&mut request).await.unwrap() > 0);
+        }
+    });
+    port
+}
+
 fn two_archive_meter(silent_reads: usize) -> Arc<Mutex<Meter>> {
     let meter = Arc::new(Mutex::new(Meter::default()));
     {
@@ -732,6 +744,38 @@ async fn connect_lockout_after_ten_failures() {
         .unwrap()
         .to_string();
     assert!(e.contains("refused until"), "{e}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_that_fails_at_identify_shows_in_the_device_status() {
+    let port = start_gateway_without_a_meter().await;
+    let dir = tempfile::tempdir().unwrap();
+    let service = Service::new(config(&dir.path().join("t.db"), port, "")).unwrap();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    let Outcome::Failed(text) = service.run_once(&slot).await.unwrap().1 else {
+        panic!("a run without an identify reply fails");
+    };
+    assert!(text.starts_with("identify: "), "{text}");
+    let st = service.devices["m"].snapshot();
+    assert_eq!(st.last_error.as_deref(), Some(text.as_str()), "{st:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_that_fails_reading_the_config_shows_in_the_device_status() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    meter.lock().unwrap().silent_value_reads = 0..1;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    accept_loop(listener, meter.clone(), true);
+    let dir = tempfile::tempdir().unwrap();
+    let service = Service::new(config(&dir.path().join("t.db"), port, "")).unwrap();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    let Outcome::Failed(text) = service.run_once(&slot).await.unwrap().1 else {
+        panic!("a run without the Config description fails");
+    };
+    assert!(text.starts_with("reading Config: "), "{text}");
+    let st = service.devices["m"].snapshot();
+    assert_eq!(st.last_error.as_deref(), Some(text.as_str()), "{st:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

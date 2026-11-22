@@ -117,6 +117,19 @@ pub async fn run_job(
         });
     }
     let mut client = cx.device.connect(cx.traffic).await?;
+    let result = run_connected(cx, &mut client, session, job).await;
+    if let Err(e) = &result {
+        cx.device.update(|s| s.last_error = Some(format!("{e:#}")));
+    }
+    result
+}
+
+async fn run_connected(
+    cx: &RunContext<'_>,
+    client: &mut MeterClient,
+    session: &mut Option<Described>,
+    job: &Job,
+) -> Result<Summary> {
     let id = client.identify().await.context("identify")?;
     let summary = IdentitySummary::new(&id, client.is_encrypted());
     cx.device.update(|s| s.identity = Some(summary));
@@ -142,8 +155,8 @@ pub async fn run_job(
             .await?
     };
 
-    let result = match &job.task {
-        Task::Clock { adjust_above } => clock_job(cx, &mut client, *adjust_above).await,
+    match &job.task {
+        Task::Clock { adjust_above } => clock_job(cx, client, *adjust_above).await,
         Task::Archive { .. } | Task::Values { .. } if !id.is_universal() => Err(anyhow!(
             "meter {} is not a universal-config meter; classic meters are not supported",
             id.device_no
@@ -153,10 +166,10 @@ pub async fn run_job(
             start_from,
             ..
         } => {
-            let described = describe(session, &mut client, &id).await?;
+            let described = describe(session, client, &id).await?;
             archive_job(
                 cx,
-                &mut client,
+                client,
                 &id,
                 described,
                 measurement,
@@ -166,21 +179,10 @@ pub async fn run_job(
             .await
         }
         Task::Values { set } => {
-            let described = describe(session, &mut client, &id).await?;
-            values_job(
-                cx,
-                &mut client,
-                described,
-                measurement,
-                config::data_set(set)?,
-            )
-            .await
+            let described = describe(session, client, &id).await?;
+            values_job(cx, client, described, measurement, config::data_set(set)?).await
         }
-    };
-    if let Err(e) = &result {
-        cx.device.update(|s| s.last_error = Some(format!("{e:#}")));
     }
-    result
 }
 
 const fn unsupported(envis: bool, archive: u8) -> Option<&'static str> {
