@@ -491,7 +491,9 @@ async fn envis_config_is_read_again_on_a_new_connection_after_a_timeout() {
          password_file = \"{}\"\ntime_zone = \"UTC\"\n",
         password.display()
     );
-    let service = Service::new(config(&dir.path().join("t.db"), port, &envis)).unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, &envis);
+    c.devices[0].byte_timeout = std::time::Duration::from_millis(300);
+    let service = Service::new(c).unwrap();
     let slot = service.job("m-archive-1").unwrap().clone();
     let Outcome::Failed(text) = service.run_once(&slot).await.unwrap().1 else {
         panic!("ENVIS is unreachable");
