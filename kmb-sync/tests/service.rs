@@ -70,6 +70,7 @@ struct Meter {
     short_reads: usize,
     cfg_time: u64,
     two_archives: bool,
+    silent_reads: usize,
 }
 
 impl Meter {
@@ -101,6 +102,10 @@ impl Meter {
                 notebook[..9].copy_from_slice(b"Station A");
                 notebook[32..40].copy_from_slice(b"01 Meter");
                 data(notebook.to_vec())
+            }
+            22 if self.silent_reads > 0 => {
+                self.silent_reads = self.silent_reads.saturating_sub(1);
+                Vec::new()
             }
             22 => {
                 let start =
@@ -279,6 +284,38 @@ async fn archive_sync_resumes_and_is_idempotent() {
     assert_eq!(rows[4].time_kmb, minute(4));
     assert_eq!(rows[4].fields[0]["name"], "U1");
     assert_eq!(rows[4].fields[0]["value"], 232.0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_timed_out_archive_does_not_stop_the_next_one() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    {
+        let mut m = meter.lock().unwrap();
+        m.records = (0..3).map(|i| record(minute(i), 1.0)).collect();
+        (m.two_archives, m.silent_reads) = (true, 1);
+    }
+    let port = start_meter(meter.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    if let kmb_sync::config::Task::Archive { archives, .. } = &mut c.jobs[0].task {
+        *archives = toml::from_str::<toml::Table>("a = [\"Elmeter\", \"Main\"]").unwrap()["a"]
+            .clone()
+            .try_into()
+            .unwrap();
+    }
+    let service = Service::new(c).unwrap();
+    let s = run(&service, "m-archive-1").await;
+    assert_eq!(s.inserted, 3, "{s:?}");
+    assert_eq!(s.errors.len(), 1, "{s:?}");
+    assert!(s.errors[0].contains("reply timed out"), "{s:?}");
+    let identifies = meter
+        .lock()
+        .unwrap()
+        .requests
+        .iter()
+        .map(|&r| usize::from(r == 1))
+        .sum::<usize>();
+    assert_eq!(identifies, 2);
 }
 
 #[tokio::test(flavor = "multi_thread")]

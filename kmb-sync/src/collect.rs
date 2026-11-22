@@ -258,21 +258,30 @@ async fn archive_job(
         archive_list(cx, client, described, archives, &mut out).await?,
         cx.resume_after,
     );
+    let mut reconnect_first = false;
     for &archive in &list {
         let before = out.inserted;
         let mut newest = None;
-        let r = sync_archive(
-            cx,
-            client,
-            described,
-            measurement,
-            archive,
-            start_from,
-            &mut out,
-            envis.as_mut(),
-            &mut newest,
-        )
-        .await;
+        let r = match reconnect_if(cx, client, described, &mut reconnect_first).await {
+            Ok(()) => {
+                sync_archive(
+                    cx,
+                    client,
+                    described,
+                    measurement,
+                    archive,
+                    start_from,
+                    &mut out,
+                    envis.as_mut(),
+                    &mut newest,
+                )
+                .await
+            }
+            Err(e) => Err(e),
+        };
+        if r.as_ref().is_err_and(reply_timed_out) {
+            reconnect_first = true;
+        }
         let error = r.as_ref().err().map(|e| format!("{e:#}"));
         let newest = newest.and_then(|t| KmbTime(t).to_unix_ms());
         let inserted = out.inserted.saturating_sub(before);
@@ -308,6 +317,41 @@ fn connection_broken(e: &anyhow::Error) -> bool {
             Some(kmb_envis::Error::Sql(_))
         )
     })
+}
+
+fn reply_timed_out(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        matches!(
+            c.downcast_ref::<kmb_tokio::Error>(),
+            Some(kmb_tokio::Error::Timeout)
+        )
+    })
+}
+
+async fn reconnect_if(
+    cx: &RunContext<'_>,
+    client: &mut MeterClient,
+    described: &Described,
+    pending: &mut bool,
+) -> Result<()> {
+    if !*pending {
+        return Ok(());
+    }
+    let mut fresh = cx
+        .device
+        .connect(cx.traffic)
+        .await
+        .context("reconnect after a timeout")?;
+    let id = fresh
+        .identify()
+        .await
+        .context("identify after a reconnect")?;
+    if !described.matches(&id) {
+        bail!("another meter answered after the reconnect");
+    }
+    *client = fresh;
+    *pending = false;
+    Ok(())
 }
 
 fn resume_order(mut list: Vec<u8>, after: Option<u8>) -> Vec<u8> {
