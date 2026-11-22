@@ -74,6 +74,7 @@ struct Meter {
     value_reads: usize,
     silent_value_reads: std::ops::Range<usize>,
     refuses_envelopes: bool,
+    other_meter_after: Option<usize>,
 }
 
 impl Meter {
@@ -101,7 +102,18 @@ impl Meter {
             return vec![refusal];
         }
         match req.command {
-            1 => data(hex(IDENTIFY)),
+            1 => {
+                let seen = self
+                    .requests
+                    .iter()
+                    .map(|&c| usize::from(c == 1))
+                    .sum::<usize>();
+                let mut id = hex(IDENTIFY);
+                if self.other_meter_after.is_some_and(|after| seen > after) {
+                    id[1] = id[1].wrapping_add(1);
+                }
+                data(id)
+            }
             17 => data(hex(RTC)),
             18 => data(vec![0]),
             112 | 114 if req.payload[8] == 2 && self.value_read_is_silent() => Vec::new(),
@@ -512,6 +524,28 @@ async fn a_reconnect_that_fails_once_succeeds_after_the_pause() {
     assert!(s.errors[0].starts_with("archive 6: "), "{s:?}");
     assert_eq!(identifies(&meter), 2);
     assert_eq!(service.devices["m"].snapshot().connect_failures, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn another_meter_after_a_reconnect_is_not_tried_again() {
+    let meter = two_archive_meter(1);
+    meter.lock().unwrap().other_meter_after = Some(1);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    accept_loop(listener, meter.clone(), false);
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    with_archives(&mut c, "[\"Elmeter\", \"Main\"]");
+    let service = Service::new(c).unwrap();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    let Outcome::Failed(text) = service.run_once(&slot).await.unwrap().1 else {
+        panic!("no archive is read from the meter");
+    };
+    assert!(
+        text.contains("another meter answered after the reconnect"),
+        "{text}"
+    );
+    assert_eq!(identifies(&meter), 2, "{text}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

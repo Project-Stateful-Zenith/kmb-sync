@@ -1,6 +1,8 @@
 use crate::clock;
 use crate::config::{self, Job, StartFrom, Task};
-use crate::device::{Described, DeviceSlot, IdentitySummary, MeterClient, Traffic, identity_info};
+use crate::device::{
+    Described, DeviceSlot, IdentitySummary, Locked, MeterClient, Traffic, identity_info,
+};
 use crate::store::StoreHandle;
 use anyhow::{Context, Result, anyhow, bail};
 use kmb::KmbTime;
@@ -374,6 +376,7 @@ async fn reconnect_if(
     ));
     let fresh = match reconnect(cx, described).await {
         Ok(fresh) => fresh,
+        Err(first) if !worth_retrying(&first) => return Err(first),
         Err(first) => {
             tokio::select! {
                 () = tokio::time::sleep(RECONNECT_PAUSE) => {}
@@ -403,9 +406,29 @@ async fn reconnect(cx: &RunContext<'_>, described: &Described) -> Result<MeterCl
         .await
         .context("identify after a reconnect")?;
     if !described.matches(&id) {
-        bail!("another meter answered after the reconnect");
+        return Err(OtherMeter.into());
     }
     Ok(fresh)
+}
+
+#[derive(Debug)]
+struct OtherMeter;
+
+impl std::fmt::Display for OtherMeter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("another meter answered after the reconnect")
+    }
+}
+
+impl std::error::Error for OtherMeter {}
+
+fn worth_retrying(e: &anyhow::Error) -> bool {
+    !e.chain().any(|c| {
+        c.is::<OtherMeter>()
+            || c.is::<Locked>()
+            || c.downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::InvalidData)
+    })
 }
 
 fn resume_order(mut list: Vec<u8>, after: Option<u8>) -> Vec<u8> {
@@ -1349,6 +1372,22 @@ mod tests {
     fn archives_not_attempted_are_named() {
         assert_eq!(archive_names(&[0]), "archive 0 (Main)");
         assert_eq!(archive_names(&[0, 6]), "archives 0 (Main), 6 (Elmeter)");
+    }
+
+    #[test]
+    fn only_passing_reconnect_errors_are_tried_again() {
+        let refused =
+            anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::ConnectionRefused))
+                .context("connect to tcp://192.0.2.10:2101/1");
+        assert!(worth_retrying(&refused));
+        let certificate = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid peer certificate",
+        ))
+        .context("TLS connect to tls://192.0.2.10:2101/1");
+        assert!(!worth_retrying(&certificate));
+        assert!(!worth_retrying(&anyhow::Error::new(OtherMeter)));
+        assert!(!worth_retrying(&anyhow::Error::new(Locked { until: 0 })));
     }
 
     #[test]

@@ -8,6 +8,23 @@ use kmb::uni::{ArchiveDescription, DataSet, Description, Value};
 use kmb_store::{DefinitionId, IdentityInfo};
 use kmb_tokio::Client;
 use serde::Serialize;
+
+#[derive(Debug)]
+pub struct Locked {
+    pub(crate) until: i64,
+}
+
+impl std::fmt::Display for Locked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "connects refused until {} after {LOCKOUT_AFTER} failures",
+            clock::rfc3339(self.until)
+        )
+    }
+}
+
+impl std::error::Error for Locked {}
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -311,10 +328,7 @@ impl DeviceSlot {
     pub async fn connect(&self, traffic: &Traffic) -> Result<MeterClient> {
         let now = clock::now_ms();
         if let Some(until) = self.update(|s| s.locked_until.filter(|&u| u > now)) {
-            anyhow::bail!(
-                "connects refused until {} after {LOCKOUT_AFTER} failures",
-                clock::rfc3339(until)
-            );
+            return Err(Locked { until }.into());
         }
         match self.open(traffic).await {
             Ok(client) => {
