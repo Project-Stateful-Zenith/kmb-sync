@@ -848,6 +848,27 @@ async fn an_answer_from_the_meter_clears_the_device_error() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_identify_after_a_failed_run_clears_the_device_error() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    meter.lock().unwrap().silent_value_reads = 0..1;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    accept_loop(listener, meter.clone(), true);
+    let dir = tempfile::tempdir().unwrap();
+    let service = Service::new(config(&dir.path().join("t.db"), port, "")).unwrap();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    assert!(matches!(
+        service.run_once(&slot).await.unwrap().1,
+        Outcome::Failed(_)
+    ));
+    let device = service.devices["m"].clone();
+    assert!(device.snapshot().last_error.is_some());
+    service.identify(&device).await.unwrap();
+    let st = device.snapshot();
+    assert_eq!(st.last_error, None, "{st:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_run_that_hits_the_job_timeout_shows_in_the_device_status() {
     let meter = two_archive_meter(1);
     let port = start_meter(meter).await;
