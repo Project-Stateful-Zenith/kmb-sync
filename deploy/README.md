@@ -53,7 +53,7 @@ sudo systemctl enable --now kmb-sync
 
 | Kind | Format | Examples |
 | --- | --- | --- |
-| Duration | number and unit (`ms`, `s`, `m`, `h`, `d`), combinable | `"20s"`, `"15m"`, `"1h 30m"`, `"1d"` |
+| Duration | number and unit (`ms`, `s`, `m`, `h`, `d`), combinable with the largest unit first and each unit once; `0` also needs a unit | `"20s"`, `"15m"`, `"1h 30m"`, `"1d"`, `"0s"` |
 | Byte size | number and unit: `B`, `kB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`; or a plain number of bytes | `"512KiB"`, `"2MiB"`, `1048576` |
 | Time | RFC 3339 with a zone | `"2026-01-01T00:00:00Z"`, `"2026-01-01T01:00:00+01:00"` |
 | Time of day | `HH:MM` or `HH:MM:SS`, local time | `"02:30"` |
@@ -118,7 +118,7 @@ Settings every job has:
 | `every` | `"1m"` | how often the job runs |
 | `anchor` | none | align runs to this time plus multiples of `every`, e.g. on the quarter hour |
 | `start_time` | none | align runs to this local time of day (instead of `anchor`, with `every` of at most `24h`); the zone is `[envis].time_zone` or the host's. Use an `every` that divides 24h, or runs around midnight are unevenly spaced (`check` warns) |
-| `timeout` | `"10m"` | maximum time of one run. It counts only while the run holds the meter, so jobs waiting for the same meter do not use up their time |
+| `timeout` | `"10m"` | maximum time of one run. It counts only while the run holds the meter, so jobs waiting for the same meter do not use up their time. Give values and clock jobs more than twice the device's `byte_timeout`: a lost reply is retried only after the line has been quiet for one `byte_timeout` |
 | `enabled` | `true` | `false` keeps the job configured but never runs it |
 | `measurement` | `"default"` | name of the measurement the records are stored under, when one meter feeds several |
 
@@ -188,9 +188,15 @@ stay in kmb-sync's own database only.
 | `time_zone` | the host's | time zone the archive periods are cut in (IANA name, e.g. `"UTC"`) |
 | `allow_new_definitions` | `false` | store a record layout ENVIS has not seen before. Off, such archives are refused until ENVIS has stored that meter once |
 
-ENVIS object and measurement names come from the meter's notebook
-(the first and second 32 bytes), decoded as CP1252. A name ENVIS does not
-know yet gets a new object.
+ENVIS object and measurement names come from the meter's notebook (the
+first and second 32 bytes); LB feeder measurements are named
+`<module>.<feeder>` from the LocalBus module's identification. All are
+decoded as CP1252: `0xFF` and `?` become spaces, the name is trimmed, an
+empty name becomes `DEFAULT`, and object names are cut to 32 characters.
+A name ENVIS does not know yet gets a new object or measurement, and its
+archive is downloaded again from `start_from`. Names stored on the meter
+in UTF-8 or another code page come out differently than in 1.3.2 and
+earlier.
 
 The login needs to read and write the archive tables only; it should not
 be able to change the schema. GO, Modbus Master, Avg, H2M and LB2 archives

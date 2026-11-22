@@ -18,6 +18,11 @@ first released with. The format follows
   (`"1M"`, `"1y"`), which were never documented and which humantime read as
   30.44 and 365.25 days, are now refused by `kmb-sync check` and at start;
   write them in days instead.
+- Correction: other forms humantime took are refused too: a bare `"0"`
+  (write `"0s"`), units out of order or repeated (`"30m 1h"`, `"1s 1s"`),
+  fractional days or weeks (`"1.5d"`), digit groups (`"1 000s"`) and values
+  above about 20,000 years. ISO 8601 forms such as `"PT15M"` are newly
+  accepted.
 - `kmb-sync check` prints a job interval of a day or more in hours, such
   as `every 24h` instead of `every 1day`.
 
@@ -27,16 +32,19 @@ first released with. The format follows
 
 - The 1.3.3 entry said the dependencies were past RUSTSEC-2026-0346 to
   0349, 0382, 0385 and 0386. That was true of zenith-kmb's lockfile, not
-  of this one: kmb-sync 1.3.3 still locked rustls 0.23.45, ctutils 0.4.3
-  and webpki-roots 1.0.9. This release fixes that.
+  of this one. 1.3.3 did fix 0382 (rustls-webpki) and 0386 (tokio), but
+  still locked rustls 0.23.45 (0346 to 0349), ctutils 0.4.3 (0385),
+  webpki-roots 1.0.9 (0381), libsqlite3-sys 0.38.2 (0459) and rustix 1.1.5
+  (0486). This release fixes all of them.
 - rustls 0.23.46 (RUSTSEC-2026-0346 to 0349), used for the ENVIS
   connection and for KMB over TLS.
 - ctutils 0.4.8 (RUSTSEC-2026-0385), webpki-roots 1.0.12
-  (RUSTSEC-2026-0381/0382) and rustix 1.1.6 (RUSTSEC-2026-0486).
+  (RUSTSEC-2026-0381) and rustix 1.1.6 (RUSTSEC-2026-0486).
 - rusqlite 0.43 with libsqlite3-sys 0.40, whose bundled SQLite is past
   CVE-2026-119375 (RUSTSEC-2026-0459). The local store and its migrations
   are unchanged.
-- CI runs `cargo audit` on every push, on pull requests and weekly.
+- CI runs `cargo audit` on pushes to `main`, on pull requests and weekly.
+  It fails on vulnerabilities; unmaintained crates only warn.
 
 ### Build
 
@@ -47,6 +55,9 @@ first released with. The format follows
 
 ### Dependencies
 
+- Correction: the advisory list below is wrong for this release; see 1.3.4
+  for what 1.3.3 left open. The CP1252 note is incomplete: see the
+  correction after it.
 - `kmb` and `kmb-tokio` 1.2.1 (from 1.1.3), with their security fixes:
   replies must answer the request, archive downloads and replies are
   bounded, each reply frame has a time limit, and rustls-webpki 0.103.17
@@ -58,6 +69,14 @@ first released with. The format follows
   to read as `�` and now reads correctly. With ENVIS, the station and
   measurement names come from the notebook, so such a meter is written to
   a new ENVIS object under the corrected name; ASCII names are unchanged.
+- Correction: LB feeder measurement names (`<module>.<feeder>`) are decoded
+  the same way and change too. Only CP1252 bytes read correctly now; a name
+  the meter stores as UTF-8 read correctly before and now reads as
+  `AbgÃ¤nge`, and other code pages such as CP1250 read wrongly in both.
+  Every changed name gets a new ENVIS object or measurement, whose archive
+  is downloaded again from `start_from`. kmb-sync finds ENVIS objects by
+  name, so renaming the old ones to the new name before upgrading should
+  keep one history; this has not been tested against ENVIS.
 
 ### `kmb-sync`
 
