@@ -204,6 +204,24 @@ async fn serve_connection(
     }
 }
 
+fn refuse_after_silence(
+    meter: Arc<Mutex<Meter>>,
+    accepting: tokio::task::JoinHandle<()>,
+    port: u16,
+) -> tokio::task::JoinHandle<tokio::net::TcpSocket> {
+    tokio::spawn(async move {
+        while meter.lock().unwrap().silent_reads > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        accepting.abort();
+        assert!(accepting.await.unwrap_err().is_cancelled());
+        let holder = tokio::net::TcpSocket::new_v4().unwrap();
+        holder.set_reuseaddr(true).unwrap();
+        holder.bind(([127, 0, 0, 1], port).into()).unwrap();
+        holder
+    })
+}
+
 fn accept_loop(
     listener: TcpListener,
     meter: Arc<Mutex<Meter>>,
@@ -443,13 +461,7 @@ async fn a_failed_reconnect_ends_the_run_without_locking_the_device() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let accepting = accept_loop(listener, meter.clone(), false);
-    let watched = meter.clone();
-    tokio::spawn(async move {
-        while watched.lock().unwrap().silent_reads > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        accepting.abort();
-    });
+    let _refusing = refuse_after_silence(meter.clone(), accepting, port);
     let dir = tempfile::tempdir().unwrap();
     let mut c = config(&dir.path().join("t.db"), port, "");
     with_archives(&mut c, "[6, 0, 1, 2, 3, 4, 5, 14, 15, 16, 17, 25, 9]");
@@ -554,13 +566,7 @@ async fn a_shutdown_during_the_reconnect_pause_skips_the_second_attempt() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let accepting = accept_loop(listener, meter.clone(), false);
-    let watched = meter.clone();
-    tokio::spawn(async move {
-        while watched.lock().unwrap().silent_reads > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        accepting.abort();
-    });
+    let _refusing = refuse_after_silence(meter.clone(), accepting, port);
     let dir = tempfile::tempdir().unwrap();
     let mut c = config(&dir.path().join("t.db"), port, "");
     with_archives(&mut c, "[\"Elmeter\", \"Main\"]");

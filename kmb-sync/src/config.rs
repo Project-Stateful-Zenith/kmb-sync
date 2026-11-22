@@ -594,9 +594,16 @@ impl Config {
                     ));
                 }
             }
-            if d.byte_timeout > kmb_tokio::REPLY_TIMEOUT {
+            if d.refuse_cleartext_pin && d.credentials_file.is_none() {
                 out.push(format!(
-                    "device {:?}: byte_timeout {:?} is above the {:?} limit for a whole reply \
+                    "device {:?}: refuse_cleartext_pin does nothing without credentials_file; no \
+                     request carries a PIN",
+                    d.name
+                ));
+            }
+            if d.byte_timeout >= kmb_tokio::REPLY_TIMEOUT {
+                out.push(format!(
+                    "device {:?}: byte_timeout {:?} is not below the {:?} limit for a whole reply \
                      frame: a silent meter is only noticed at that limit and lost replies are not \
                      retried",
                     d.name,
@@ -1135,12 +1142,13 @@ every = "1h"
         assert_eq!(
             with_device("byte_timeout = \"90s\"").warnings(),
             [
-                "device \"station-a\": byte_timeout 90s is above the 60s limit for a whole reply \
-                 frame: a silent meter is only noticed at that limit and lost replies are not retried"
+                "device \"station-a\": byte_timeout 90s is not below the 60s limit for a whole \
+                 reply frame: a silent meter is only noticed at that limit and lost replies are not \
+                 retried"
             ]
         );
-        assert!(warned("byte_timeout = \"61s\""));
-        assert!(!warned("byte_timeout = \"60s\""));
+        assert!(warned("byte_timeout = \"60s\""));
+        assert!(!warned("byte_timeout = \"59s\""));
         assert!(!warned(""));
     }
 
@@ -1170,6 +1178,19 @@ every = "1h"
         assert!(!warned(&format!("{keyed}\nrequire_encryption = true")));
         assert!(!warned(&format!("{keyed}\nrefuse_cleartext_pin = true")));
         assert!(!warned("credentials_file = \"/c\"\ntls = true"));
+    }
+
+    #[test]
+    fn refuse_cleartext_pin_without_credentials_warning() {
+        assert_eq!(
+            with_device("psk_file = \"/k\"\nrefuse_cleartext_pin = true").warnings(),
+            [
+                "device \"station-a\": refuse_cleartext_pin does nothing without credentials_file; \
+                 no request carries a PIN"
+            ]
+        );
+        let with_pin = "credentials_file = \"/c\"\npsk_file = \"/k\"\nrefuse_cleartext_pin = true";
+        assert_eq!(with_device(with_pin).warnings(), Vec::<String>::new());
     }
 
     #[test]
