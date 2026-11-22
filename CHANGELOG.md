@@ -30,12 +30,13 @@ first released with. The format follows
 
 ### Security
 
-- The 1.3.3 entry said the dependencies were past RUSTSEC-2026-0346 to
-  0349, 0382, 0385 and 0386. That was true of zenith-kmb's lockfile, not
-  of this one. 1.3.3 did fix 0382 (rustls-webpki) and 0386 (tokio), but
-  still locked rustls 0.23.45 (0346 to 0349), ctutils 0.4.3 (0385),
-  webpki-roots 1.0.9 (0381), libsqlite3-sys 0.38.2 (0459) and rustix 1.1.5
-  (0486). This release fixes all of them.
+- Correction: the 1.3.3 entry said the dependencies were past
+  RUSTSEC-2026-0346 to 0349, 0382, 0385 and 0386. That was true of
+  zenith-kmb's lockfile, not of this one. 1.3.3 did fix 0382
+  (rustls-webpki) and 0386 (tokio), but still locked rustls 0.23.45 (0346
+  to 0349), ctutils 0.4.3 (0385), webpki-roots 1.0.9 (0381),
+  libsqlite3-sys 0.38.2 (0459) and rustix 1.1.5 (0486). This release fixes
+  all of them.
 - rustls 0.23.46 (RUSTSEC-2026-0346 to 0349), used for the ENVIS
   connection and for KMB over TLS.
 - ctutils 0.4.8 (RUSTSEC-2026-0385), webpki-roots 1.0.12
@@ -45,6 +46,9 @@ first released with. The format follows
   are unchanged.
 - CI runs `cargo audit` on pushes to `main`, on pull requests and weekly.
   It fails on vulnerabilities; unmaintained crates only warn.
+- Correction: at release this entry gave webpki-roots as 0381/0382 and
+  said the audit ran on every push and failed on every advisory; the
+  lines above are corrected.
 
 ### Build
 

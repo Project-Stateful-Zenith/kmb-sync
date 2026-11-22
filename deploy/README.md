@@ -101,7 +101,7 @@ should not be visible.
 | `tls_pins` | `[]` | SHA-256 fingerprints of meter certificates to accept, hex with or without `:` |
 | `tls_common_name` | none | with `tls_root`: accept a certificate through the root only when its common name is this, so another meter's certificate from the same CA is refused |
 | `connect_timeout` | `"5s"` | time allowed to open the connection |
-| `byte_timeout` | `"10s"` | time allowed between bytes of a reply; a whole reply frame must also arrive within 60 s. After a timeout, a closed connection or a socket error the run reconnects before the next archive, trying a second time after 1 s; if that fails too, the rest of the run's archives are reported as not attempted |
+| `byte_timeout` | `"10s"` | time allowed between bytes of a reply; a whole reply frame must also arrive within 60 s. Keep it below 60 s: above that a silent meter is only noticed at the frame limit and lost replies are not retried. After a timeout, a closed connection or a socket error the run reconnects before the next archive, trying a second time after 1 s; if that fails too, the rest of the run's archives are reported as not attempted. A failed reconnect can take two times `connect_timeout` (four with TLS) plus two times `byte_timeout` plus about 2 s, 31.6 s with the defaults |
 | `packed` | `6800` | packet size written into the ENVIS device URL (only with `[envis]`) |
 | `envis_url` | built from host, port, address and `packed` | the device URL stored in ENVIS, when it must match an existing one exactly |
 
