@@ -372,11 +372,20 @@ async fn reconnect_if(
         client,
         disconnected(cx.device.config.address),
     ));
-    let fresh = if let Ok(fresh) = reconnect(cx, described).await {
-        fresh
-    } else {
-        tokio::time::sleep(RECONNECT_PAUSE).await;
-        reconnect(cx, described).await?
+    let fresh = match reconnect(cx, described).await {
+        Ok(fresh) => fresh,
+        Err(first) => {
+            tokio::select! {
+                () = tokio::time::sleep(RECONNECT_PAUSE) => {}
+                () = cx.cancel.cancelled() => return Err(first),
+            }
+            let fresh = reconnect(cx, described).await?;
+            tracing::info!(
+                device = %cx.device.config.name,
+                "reconnected on the second attempt after: {first:#}"
+            );
+            fresh
+        }
     };
     *client = fresh;
     *pending = false;

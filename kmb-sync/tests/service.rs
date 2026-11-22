@@ -515,6 +515,36 @@ async fn a_reconnect_that_fails_once_succeeds_after_the_pause() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_shutdown_during_the_reconnect_pause_skips_the_second_attempt() {
+    let meter = two_archive_meter(1);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepting = accept_loop(listener, meter.clone(), false);
+    let watched = meter.clone();
+    tokio::spawn(async move {
+        while watched.lock().unwrap().silent_reads > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        accepting.abort();
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    with_archives(&mut c, "[\"Elmeter\", \"Main\"]");
+    let service = Service::new(c).unwrap();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    let cancel_in_pause = async {
+        while service.devices["m"].snapshot().connect_failures == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        service.cancel.cancel();
+    };
+    let (outcome, ()) = tokio::join!(service.run_once(&slot), cancel_in_pause);
+    let outcome = outcome.unwrap().1;
+    assert!(!matches!(outcome, Outcome::Done(_)), "{outcome:?}");
+    assert_eq!(service.devices["m"].snapshot().connect_failures, 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn envis_config_is_read_again_on_a_new_connection_after_a_timeout() {
     let meter = Arc::new(Mutex::new(Meter::default()));
     {
