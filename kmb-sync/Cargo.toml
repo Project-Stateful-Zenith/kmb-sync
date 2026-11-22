@@ -34,6 +34,7 @@ time = { version = "0.3.55", features = ["formatting", "parsing", "macros"] }
 workspace = true
 
 [dev-dependencies]
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
 tempfile = "3.27.0"
 tiberius = { version = "0.13.0", default-features = false, features = ["tds73", "rustls"] }
 tokio-util = { version = "0.7.20", features = ["compat"] }
