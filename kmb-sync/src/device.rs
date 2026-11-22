@@ -358,11 +358,20 @@ impl DeviceSlot {
             traffic: traffic.clone(),
         });
         #[cfg(feature = "tls")]
-        let io = if d.tls { self.open_tls(io).await? } else { io };
+        let (io, secure_transport) = if d.tls {
+            (self.open_tls(io).await?, true)
+        } else {
+            (io, false)
+        };
+        #[cfg(not(feature = "tls"))]
+        let secure_transport = false;
         tokio::time::sleep(kmb_tokio::SETTLE).await;
         let mut client = Client::new(io, d.address);
         client.set_byte_timeout(d.byte_timeout);
         client.set_one_frame_archives(true);
+        client.set_secure_transport(secure_transport);
+        client.set_require_encryption(d.require_encryption);
+        client.set_refuse_cleartext_pin(d.refuse_cleartext_pin);
         if let Some((user, password)) = &self.secrets.credentials {
             client.set_credentials(user, password);
         }
@@ -374,8 +383,10 @@ impl DeviceSlot {
 
     #[cfg(feature = "tls")]
     async fn open_tls(&self, io: Box<dyn Stream>) -> Result<Box<dyn Stream>> {
-        use kmb_tokio::tls::{SERVER_NAME, Trust, client_config};
+        use kmb_tokio::tls::{SERVER_NAME, Trust, Verifier};
         use tokio_rustls::TlsConnector;
+        use tokio_rustls::rustls::ClientConfig;
+        use tokio_rustls::rustls::crypto::ring;
         use tokio_rustls::rustls::pki_types::ServerName;
         let d = &self.config;
         let pins = d
@@ -389,7 +400,16 @@ impl DeviceSlot {
             Some((x, y)) => Trust::RootOrPinned(x, y, pins),
             None => Trust::Pinned(pins),
         };
-        let connector = TlsConnector::from(Arc::new(client_config(trust)));
+        let verifier = match &d.tls_common_name {
+            Some(name) => Verifier::new(trust).expecting_common_name(name.clone()),
+            None => Verifier::new(trust),
+        };
+        let config = ClientConfig::builder_with_provider(Arc::new(ring::default_provider()))
+            .with_safe_default_protocol_versions()?
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verifier))
+            .with_no_client_auth();
+        let connector = TlsConnector::from(Arc::new(config));
         let name = ServerName::try_from(SERVER_NAME)?;
         let stream = tokio::time::timeout(d.connect_timeout, connector.connect(name, io))
             .await

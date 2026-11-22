@@ -73,6 +73,7 @@ struct Meter {
     silent_reads: usize,
     value_reads: usize,
     silent_value_reads: std::ops::Range<usize>,
+    refuses_envelopes: bool,
 }
 
 impl Meter {
@@ -90,6 +91,15 @@ impl Meter {
         self.requests.push(req.command);
         let a = req.address;
         let data = |p: Vec<u8>| vec![Frame::new(a, req.command, p)];
+        let handshake = [1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+        if self.refuses_envelopes {
+            let refusal = if req.command == 111 {
+                Frame::new(a, 239, [&[10][..], &handshake].concat())
+            } else {
+                Frame::new(a, req.command | 0x80, [&[9][..], &handshake].concat())
+            };
+            return vec![refusal];
+        }
         match req.command {
             1 => data(hex(IDENTIFY)),
             17 => data(hex(RTC)),
@@ -821,6 +831,82 @@ async fn waiting_for_the_meter_does_not_count_toward_the_timeout() {
         Outcome::Done(s) => assert_eq!(s.inserted, 1),
         other => panic!("{other:?}"),
     }
+}
+
+fn with_secrets(c: &mut Config, dir: &std::path::Path) {
+    let psk = dir.join("m.psk");
+    std::fs::write(&psk, format!("{}=\n", "A".repeat(43))).unwrap();
+    let credentials = dir.join("m.cred");
+    std::fs::write(&credentials, "user\npassword\n").unwrap();
+    c.devices[0].psk_file = Some(psk);
+    c.devices[0].credentials_file = Some(credentials);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_psk_device_still_talks_to_a_cleartext_meter_by_default() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    let port = start_meter(meter.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    with_secrets(&mut c, dir.path());
+    let service = Service::new(c).unwrap();
+    let device = service.devices["m"].clone();
+    let mut client = device.connect(&Traffic::default()).await.unwrap();
+    client.identify().await.unwrap();
+    assert!(!client.is_encrypted());
+    client.adjust_clock().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn require_encryption_refuses_a_meter_that_answers_in_cleartext() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    let port = start_meter(meter.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    with_secrets(&mut c, dir.path());
+    c.devices[0].require_encryption = true;
+    let service = Service::new(c).unwrap();
+    let device = service.devices["m"].clone();
+    let mut client = device.connect(&Traffic::default()).await.unwrap();
+    let e = client.identify().await.unwrap_err().to_string();
+    assert!(e.starts_with("envelope:"), "{e}");
+    assert_eq!(client.pin(), 0);
+    assert_eq!(meter.lock().unwrap().requests, [1]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn require_encryption_still_reports_a_rejected_key() {
+    let meter = Arc::new(Mutex::new(Meter {
+        refuses_envelopes: true,
+        ..Meter::default()
+    }));
+    let port = start_meter(meter.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    with_secrets(&mut c, dir.path());
+    c.devices[0].require_encryption = true;
+    let service = Service::new(c).unwrap();
+    let device = service.devices["m"].clone();
+    let mut client = device.connect(&Traffic::default()).await.unwrap();
+    let e = client.identify().await.unwrap_err().to_string();
+    assert_eq!(e, "meter 0001-0203-0405-0607-0809-0A0B rejected the key");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuse_cleartext_pin_keeps_the_pin_off_a_cleartext_link() {
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    let port = start_meter(meter.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    with_secrets(&mut c, dir.path());
+    c.devices[0].refuse_cleartext_pin = true;
+    let service = Service::new(c).unwrap();
+    let device = service.devices["m"].clone();
+    let mut client = device.connect(&Traffic::default()).await.unwrap();
+    client.identify().await.unwrap();
+    let e = client.adjust_clock().await.unwrap_err().to_string();
+    assert!(e.contains("PIN would be sent in cleartext"), "{e}");
+    assert!(!meter.lock().unwrap().requests.contains(&18));
 }
 
 #[tokio::test(flavor = "multi_thread")]

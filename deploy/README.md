@@ -93,18 +93,21 @@ should not be visible.
 | `address` | `1` | bus address of the meter behind the host |
 | `path` | `[name]` | where the meter's measurements sit in the object tree, e.g. `["Network", "Riverside", "Riverside Substation"]` |
 | `credentials_file` | none | file with the meter login: user on the first line, password on the second |
-| `psk_file` | none | file with the meter's pre-shared key for encrypted links, Base64 of 32 bytes |
+| `psk_file` | none | file with the meter's pre-shared key for encrypted links, Base64 of 32 bytes. The envelope starts only when the meter asks for it; a meter that also answers cleartext is read in cleartext |
+| `require_encryption` | `false` | with `psk_file`: refuse a meter that answers in cleartext, before any request carrying the PIN is sent. Leave it off for a meter whose key is set but that still accepts cleartext requests |
+| `refuse_cleartext_pin` | `false` | with `credentials_file`: fail a request that carries the PIN unless the envelope or TLS protects it. Needs `psk_file` or `tls` |
 | `tls` | `false` | connect over TLS; needs a build with `--features tls` |
 | `tls_root` | none | public key of the root CA that signed the meter's certificate: an uncompressed P-256 point in hex (`04`, then X and Y) |
 | `tls_pins` | `[]` | SHA-256 fingerprints of meter certificates to accept, hex with or without `:` |
+| `tls_common_name` | none | with `tls_root`: accept a certificate through the root only when its common name is this, so another meter's certificate from the same CA is refused |
 | `connect_timeout` | `"5s"` | time allowed to open the connection |
 | `byte_timeout` | `"10s"` | time allowed between bytes of a reply; a whole reply frame must also arrive within 60 s. After a timeout the run reconnects before the next archive |
 | `packed` | `6800` | packet size written into the ENVIS device URL (only with `[envis]`) |
 | `envis_url` | built from host, port, address and `packed` | the device URL stored in ENVIS, when it must match an existing one exactly |
 
 With `tls = true`, set `tls_root`, `tls_pins` or both. A certificate is
-accepted when it is pinned or when its chain leads to `tls_root`. No root
-key is built in.
+accepted when it is pinned or when its chain leads to `tls_root` and, with
+`tls_common_name`, names that meter. No root key is built in.
 
 ## `[[job]]`
 

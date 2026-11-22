@@ -122,11 +122,17 @@ pub struct Device {
     #[serde(default)]
     pub tls_pins: Vec<String>,
     #[serde(default)]
+    pub tls_common_name: Option<String>,
+    #[serde(default)]
     pub path: Vec<String>,
     #[serde(default)]
     pub credentials_file: Option<PathBuf>,
     #[serde(default)]
     pub psk_file: Option<PathBuf>,
+    #[serde(default)]
+    pub require_encryption: bool,
+    #[serde(default)]
+    pub refuse_cleartext_pin: bool,
     #[serde(default = "default_connect_timeout", with = "duration")]
     pub connect_timeout: Duration,
     #[serde(default = "default_byte_timeout", with = "duration")]
@@ -492,6 +498,7 @@ impl Config {
             for pin in &d.tls_pins {
                 parse_fingerprint(pin).with_context(|| format!("device {:?}", d.name))?;
             }
+            check_link_protections(d)?;
         }
         let mut counts = std::collections::HashMap::<String, usize>::new();
         let mut jobs = HashSet::new();
@@ -570,6 +577,26 @@ impl Config {
                 "the status page listens on {addr} by default, open to the network without \
                  a password; set service.status_listen to choose"
             ));
+        }
+        for d in &self.devices {
+            if d.credentials_file.is_some()
+                && d.psk_file.is_none()
+                && !d.tls
+                && !d.refuse_cleartext_pin
+            {
+                out.push(format!(
+                    "device {:?}: the PIN crosses the link in cleartext; set psk_file or tls, \
+                     or refuse_cleartext_pin = true to refuse sending it",
+                    d.name
+                ));
+            }
+            if d.tls && d.tls_root.is_some() && d.tls_common_name.is_none() {
+                out.push(format!(
+                    "device {:?}: tls_root accepts any certificate the CA signed, also another \
+                     meter's; set tls_common_name, or use tls_pins without tls_root",
+                    d.name
+                ));
+            }
         }
         for j in &self.jobs {
             if j.start_time.is_some() && !86_400_000_u128.is_multiple_of(j.every.as_millis().max(1))
@@ -690,6 +717,25 @@ pub fn read_secret(path: &Path) -> Result<String> {
     let s = std::fs::read_to_string(path)
         .with_context(|| format!("reading secret file {}", path.display()))?;
     Ok(s.trim_end_matches(['\r', '\n']).to_string())
+}
+
+fn check_link_protections(d: &Device) -> Result<()> {
+    if d.tls_common_name.is_some() && !(d.tls && d.tls_root.is_some()) {
+        bail!(
+            "device {:?}: tls_common_name needs tls = true and tls_root",
+            d.name
+        );
+    }
+    if d.require_encryption && d.psk_file.is_none() {
+        bail!("device {:?}: require_encryption needs psk_file", d.name);
+    }
+    if d.refuse_cleartext_pin && d.credentials_file.is_some() && d.psk_file.is_none() && !d.tls {
+        bail!(
+            "device {:?}: refuse_cleartext_pin needs psk_file or tls",
+            d.name
+        );
+    }
+    Ok(())
 }
 
 fn check_name(what: &str, name: &str) -> Result<()> {
@@ -978,6 +1024,116 @@ every = "1h"
         )
         .unwrap();
         assert!(Config::load(&file).unwrap().service.status_listen_set);
+    }
+
+    fn with_device(extra: &str) -> Config {
+        let text = EXAMPLE.replace(
+            "host = \"192.0.2.10\"",
+            &format!("host = \"192.0.2.10\"\n{extra}"),
+        );
+        let mut c: Config = toml::from_str(&text).unwrap();
+        c.service.status_listen_set = true;
+        c
+    }
+
+    #[test]
+    fn link_protections_parse_and_default_off() {
+        let c = with_device("");
+        assert!(!c.devices[0].require_encryption);
+        assert!(!c.devices[0].refuse_cleartext_pin);
+        assert_eq!(c.devices[0].tls_common_name, None);
+        let c = with_device(
+            "psk_file = \"/k\"\nrequire_encryption = true\nrefuse_cleartext_pin = true",
+        );
+        assert!(c.devices[0].require_encryption);
+        assert!(c.devices[0].refuse_cleartext_pin);
+    }
+
+    #[test]
+    fn link_protections_that_cannot_work_are_rejected() {
+        let check = |extra: &str| {
+            let mut c = with_device(extra);
+            c.check().map_err(|e| format!("{e:#}"))
+        };
+        assert!(
+            check("require_encryption = true")
+                .unwrap_err()
+                .contains("require_encryption needs psk_file")
+        );
+        assert!(check("psk_file = \"/k\"\nrequire_encryption = true").is_ok());
+        assert!(
+            check("credentials_file = \"/c\"\nrefuse_cleartext_pin = true")
+                .unwrap_err()
+                .contains("refuse_cleartext_pin needs psk_file or tls")
+        );
+        assert!(check("refuse_cleartext_pin = true").is_ok());
+        assert!(
+            check("credentials_file = \"/c\"\npsk_file = \"/k\"\nrefuse_cleartext_pin = true")
+                .is_ok()
+        );
+        assert!(
+            check("tls_common_name = \"meter-1\"")
+                .unwrap_err()
+                .contains("tls_common_name needs tls = true and tls_root")
+        );
+    }
+
+    #[cfg(feature = "tls")]
+    #[test]
+    fn tls_common_name_needs_a_root() {
+        let root = format!("tls_root = \"04{}\"", "11".repeat(64));
+        let pins = format!("tls_pins = [\"{}\"]", "AB".repeat(32));
+        let check = |extra: &str| {
+            let mut c = with_device(&format!(
+                "tls = true\ntls_common_name = \"meter-1\"\n{extra}"
+            ));
+            c.check().map_err(|e| format!("{e:#}"))
+        };
+        assert!(check(&root).is_ok());
+        assert!(
+            check(&pins)
+                .unwrap_err()
+                .contains("tls_common_name needs tls = true and tls_root")
+        );
+    }
+
+    #[test]
+    fn cleartext_pin_warning() {
+        let warned = |extra: &str| {
+            let c = with_device(extra);
+            c.warnings()
+                .iter()
+                .any(|w| w.contains("the PIN crosses the link in cleartext"))
+        };
+        assert!(warned("credentials_file = \"/c\""));
+        assert_eq!(
+            with_device("credentials_file = \"/c\"").warnings(),
+            [
+                "device \"station-a\": the PIN crosses the link in cleartext; set psk_file or \
+                 tls, or refuse_cleartext_pin = true to refuse sending it"
+            ]
+        );
+        assert!(!warned(""));
+        assert!(!warned("credentials_file = \"/c\"\npsk_file = \"/k\""));
+        assert!(!warned("credentials_file = \"/c\"\ntls = true"));
+    }
+
+    #[test]
+    fn tls_root_without_a_common_name_warning() {
+        let root = format!("tls = true\ntls_root = \"04{}\"", "11".repeat(64));
+        assert_eq!(
+            with_device(&root).warnings(),
+            [
+                "device \"station-a\": tls_root accepts any certificate the CA signed, also \
+                 another meter's; set tls_common_name, or use tls_pins without tls_root"
+            ]
+        );
+        let pins = format!("tls_pins = [\"{}\"]", "AB".repeat(32));
+        assert_eq!(with_device(&format!("{root}\n{pins}")).warnings().len(), 1);
+        let named = format!("{root}\ntls_common_name = \"meter-1\"");
+        assert_eq!(with_device(&named).warnings(), Vec::<String>::new());
+        let pinned_only = format!("tls = true\n{pins}");
+        assert_eq!(with_device(&pinned_only).warnings(), Vec::<String>::new());
     }
 
     #[test]
