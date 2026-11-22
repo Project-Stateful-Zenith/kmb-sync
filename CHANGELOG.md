@@ -7,6 +7,18 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-11-22
+
+### `kmb-sync`
+
+- `kmb-sync check` and the service at start now warn when `byte_timeout`
+  is 60 s, not only above it: at exactly the reply frame limit the retry
+  after a lost reply works only by chance.
+- They also warn when `refuse_cleartext_pin` is set without
+  `credentials_file`, where it does nothing.
+- The failed-reconnect tests keep the fake meter's port refusing instead
+  of leaving it free for another test to bind.
+
 ## [1.4.1] - 2026-11-22
 
 ### `kmb-sync`
@@ -276,6 +288,7 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.4.2]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.2
 [1.4.1]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.1
 [1.4.0]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.0
 [1.3.5]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.5
