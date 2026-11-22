@@ -472,6 +472,49 @@ async fn a_failed_reconnect_ends_the_run_without_locking_the_device() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_reconnect_that_fails_once_succeeds_after_the_pause() {
+    let meter = two_archive_meter(1);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let served = meter.clone();
+    let accepted_at = Arc::new(Mutex::new(Vec::new()));
+    let accepts = accepted_at.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((io, _)) = listener.accept().await else {
+                return;
+            };
+            let count = {
+                let mut at = accepts.lock().unwrap();
+                at.push(std::time::Instant::now());
+                at.len()
+            };
+            if count == 2 {
+                drop(io);
+            } else {
+                tokio::spawn(serve_connection(io, served.clone(), false));
+            }
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config(&dir.path().join("t.db"), port, "");
+    with_archives(&mut c, "[\"Elmeter\", \"Main\"]");
+    let service = Service::new(c).unwrap();
+    let slot = service.job("m-archive-1").unwrap().clone();
+    let Outcome::Done(s) = service.run_once(&slot).await.unwrap().1 else {
+        panic!("the second reconnect attempt reaches the meter");
+    };
+    let at = accepted_at.lock().unwrap().clone();
+    assert_eq!(at.len(), 3);
+    assert!(at[2].duration_since(at[1]) >= kmb_sync::collect::RECONNECT_PAUSE);
+    assert_eq!(s.inserted, 3, "{s:?}");
+    assert_eq!(s.errors.len(), 1, "{s:?}");
+    assert!(s.errors[0].starts_with("archive 6: "), "{s:?}");
+    assert_eq!(identifies(&meter), 2);
+    assert_eq!(service.devices["m"].snapshot().connect_failures, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn envis_config_is_read_again_on_a_new_connection_after_a_timeout() {
     let meter = Arc::new(Mutex::new(Meter::default()));
     {
