@@ -238,7 +238,7 @@ fn check(path: &std::path::Path) -> Result<()> {
             "job {} on {} every {}{state}: {:?}",
             j.name,
             j.device,
-            humantime::format_duration(j.every),
+            duration_text(j.every),
             j.task
         )?;
     }
@@ -252,15 +252,19 @@ fn check(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Whole days as `365d`; humantime would write `11months 30days 3h 50m 24s`.
+/// Whole days as `365d` instead of `8760h`.
 fn days_text(d: std::time::Duration) -> String {
     const DAY: u64 = 86_400;
     let secs = d.as_secs();
     if d.subsec_nanos() == 0 && secs.is_multiple_of(DAY) {
         format!("{}d", secs / DAY)
     } else {
-        humantime::format_duration(d).to_string()
+        duration_text(d)
     }
+}
+
+fn duration_text(d: std::time::Duration) -> String {
+    jiff::SignedDuration::try_from(d).map_or_else(|_| format!("{d:?}"), |j| format!("{j:#}"))
 }
 
 fn forecast_text(f: &kmb_sync::config::LinkForecast) -> String {

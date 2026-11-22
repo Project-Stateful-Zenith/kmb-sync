@@ -62,11 +62,11 @@ pub struct Service {
     pub status_api_token_file: Option<PathBuf>,
     #[serde(default = "default_concurrency")]
     pub max_concurrency: usize,
-    #[serde(default = "default_heartbeat", with = "humantime_serde")]
+    #[serde(default = "default_heartbeat", with = "duration")]
     pub heartbeat: Duration,
-    #[serde(default = "default_describe_every", with = "humantime_serde")]
+    #[serde(default = "default_describe_every", with = "duration")]
     pub describe_every: Duration,
-    #[serde(default, with = "humantime_serde::option")]
+    #[serde(default, with = "duration::option")]
     pub run_log_rotate: Option<Duration>,
     /// Whether the file sets `status_listen`; filled in by [`Config::load`].
     #[serde(skip)]
@@ -127,9 +127,9 @@ pub struct Device {
     pub credentials_file: Option<PathBuf>,
     #[serde(default)]
     pub psk_file: Option<PathBuf>,
-    #[serde(default = "default_connect_timeout", with = "humantime_serde")]
+    #[serde(default = "default_connect_timeout", with = "duration")]
     pub connect_timeout: Duration,
-    #[serde(default = "default_byte_timeout", with = "humantime_serde")]
+    #[serde(default = "default_byte_timeout", with = "duration")]
     pub byte_timeout: Duration,
     #[serde(default = "default_packed")]
     pub packed: u32,
@@ -278,7 +278,7 @@ pub enum Task {
         set: String,
     },
     Clock {
-        #[serde(default, with = "humantime_serde::option")]
+        #[serde(default, with = "duration::option")]
         adjust_above: Option<Duration>,
     },
 }
@@ -348,13 +348,13 @@ pub struct Job {
     #[serde(default)]
     pub name: String,
     pub device: String,
-    #[serde(default = "default_every", with = "humantime_serde")]
+    #[serde(default = "default_every", with = "duration")]
     pub every: Duration,
     #[serde(default, deserialize_with = "opt_time")]
     pub anchor: Option<OffsetDateTime>,
     #[serde(default, deserialize_with = "opt_time_of_day")]
     pub start_time: Option<jiff::civil::Time>,
-    #[serde(default = "default_timeout", with = "humantime_serde")]
+    #[serde(default = "default_timeout", with = "duration")]
     pub timeout: Duration,
     #[serde(default = "default_measurement")]
     pub measurement: String,
@@ -722,13 +722,24 @@ pub fn read_credentials(path: &Path) -> Result<(String, String)> {
     Ok((user, password))
 }
 
-mod humantime_serde {
+pub fn parse_duration(text: &str) -> std::result::Result<Duration, String> {
+    let invalid = |e: jiff::Error| {
+        format!("invalid duration {text:?}, use ms, s, m, h or d such as \"1h 30m\": {e}")
+    };
+    let span: jiff::Span = text.trim().parse().map_err(invalid)?;
+    let signed = span
+        .to_duration(jiff::SpanRelativeTo::days_are_24_hours())
+        .map_err(invalid)?;
+    Duration::try_from(signed).map_err(|_| format!("invalid duration {text:?}: it is negative"))
+}
+
+mod duration {
     use serde::{Deserialize, Deserializer};
     use std::time::Duration;
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
         let s = String::deserialize(d)?;
-        humantime::parse_duration(&s).map_err(serde::de::Error::custom)
+        super::parse_duration(&s).map_err(serde::de::Error::custom)
     }
 
     pub mod option {
@@ -736,7 +747,7 @@ mod humantime_serde {
 
         pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
             let s = Option::<String>::deserialize(d)?;
-            s.map(|s| humantime::parse_duration(&s).map_err(serde::de::Error::custom))
+            s.map(|s| super::super::parse_duration(&s).map_err(serde::de::Error::custom))
                 .transpose()
         }
     }
@@ -837,6 +848,28 @@ every = "1h"
         };
         assert_eq!(with("365d").unwrap(), Some(Duration::from_hours(365 * 24)));
         assert!(with("12h").is_err());
+    }
+
+    #[test]
+    fn durations() {
+        let ok = [
+            ("20s", Duration::from_secs(20)),
+            ("15m", Duration::from_mins(15)),
+            ("1h 30m", Duration::from_mins(90)),
+            ("1h30m", Duration::from_mins(90)),
+            (" 1d ", Duration::from_hours(24)),
+            ("365d", Duration::from_hours(365 * 24)),
+            ("500ms", Duration::from_millis(500)),
+            ("2days", Duration::from_hours(48)),
+            ("1w", Duration::from_hours(7 * 24)),
+            ("0s", Duration::ZERO),
+        ];
+        for (text, want) in ok {
+            assert_eq!(parse_duration(text), Ok(want), "{text:?}");
+        }
+        for text in ["", "90", "1y", "1M", "-5m", "5m ago", "soon"] {
+            assert!(parse_duration(text).is_err(), "{text:?}");
+        }
     }
 
     #[test]
