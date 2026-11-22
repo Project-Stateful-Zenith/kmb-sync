@@ -7,6 +7,15 @@ first released with. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-11-22
+
+### `kmb-sync`
+
+- Fixed: the second reconnect attempt (1.4.0) was also made when retrying
+  could not help. A run now stops at the first attempt when another meter
+  answers, when the device's connects are locked, or when the TLS
+  certificate or handshake is refused.
+
 ## [1.4.0] - 2026-11-22
 
 ### `kmb-sync`
@@ -267,6 +276,7 @@ First tagged release, built on `kmb` and `kmb-tokio` 1.1.3.
 
 - Writes downloaded records into an ENVIS 2.5 MSSQL database.
 
+[1.4.1]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.1
 [1.4.0]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.4.0
 [1.3.5]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.5
 [1.3.4]: https://github.com/Project-Stateful-Zenith/kmb-sync/releases/tag/v1.3.4
