@@ -132,7 +132,7 @@ async fn run_connected(
 ) -> Result<Summary> {
     let id = client.identify().await.context("identify")?;
     let summary = IdentitySummary::new(&id, client.is_encrypted());
-    cx.device.update(|s| s.identity = Some(summary));
+    cx.device.answered(summary);
     if session
         .as_ref()
         .is_some_and(|d| !d.matches(&id) || d.at.elapsed() > cx.describe_every)
@@ -223,7 +223,7 @@ pub async fn survey(
     let mut client = device.connect(traffic).await?;
     let id = client.identify().await.context("identify")?;
     let summary = IdentitySummary::new(&id, client.is_encrypted());
-    device.update(|s| s.identity = Some(summary));
+    device.answered(summary);
     if !id.is_universal() {
         return Ok(());
     }
@@ -241,7 +241,7 @@ pub async fn identify(device: &DeviceSlot, traffic: &Traffic) -> Result<Identity
     let mut client = device.connect(traffic).await?;
     let id = client.identify().await.context("identify")?;
     let summary = IdentitySummary::new(&id, client.is_encrypted());
-    device.update(|s| s.identity = Some(summary.clone()));
+    device.answered(summary.clone());
     Ok(summary)
 }
 
@@ -410,6 +410,8 @@ async fn reconnect(cx: &RunContext<'_>, described: &Described) -> Result<MeterCl
     if !described.matches(&id) {
         return Err(OtherMeter.into());
     }
+    cx.device
+        .answered(IdentitySummary::new(&id, fresh.is_encrypted()));
     Ok(fresh)
 }
 

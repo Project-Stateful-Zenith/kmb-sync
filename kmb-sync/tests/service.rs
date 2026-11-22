@@ -761,6 +761,25 @@ async fn a_run_that_fails_at_identify_shows_in_the_device_status() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn contact_counts_only_once_the_meter_answered() {
+    let port = start_gateway_without_a_meter().await;
+    let dir = tempfile::tempdir().unwrap();
+    let service = Service::new(config(&dir.path().join("t.db"), port, "")).unwrap();
+    let device = service.devices["m"].clone();
+    assert!(service.identify(&device).await.is_err());
+    let st = device.snapshot();
+    assert_eq!(st.last_ok, None, "{st:?}");
+    assert_eq!(st.connect_failures, 0, "{st:?}");
+
+    let meter = Arc::new(Mutex::new(Meter::default()));
+    let port = start_meter(meter).await;
+    let service = Service::new(config(&dir.path().join("u.db"), port, "")).unwrap();
+    let device = service.devices["m"].clone();
+    service.identify(&device).await.unwrap();
+    assert!(device.snapshot().last_ok.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_run_that_fails_reading_the_config_shows_in_the_device_status() {
     let meter = Arc::new(Mutex::new(Meter::default()));
     meter.lock().unwrap().silent_value_reads = 0..1;

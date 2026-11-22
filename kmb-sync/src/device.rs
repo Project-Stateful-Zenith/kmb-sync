@@ -325,6 +325,13 @@ impl DeviceSlot {
         self.update(|s| s.clone())
     }
 
+    pub fn answered(&self, identity: IdentitySummary) {
+        self.update(|s| {
+            s.last_ok = Some(clock::now_ms());
+            s.identity = Some(identity);
+        });
+    }
+
     pub async fn connect(&self, traffic: &Traffic) -> Result<MeterClient> {
         let now = clock::now_ms();
         if let Some(until) = self.update(|s| s.locked_until.filter(|&u| u > now)) {
@@ -335,7 +342,6 @@ impl DeviceSlot {
                 self.update(|s| {
                     s.connect_failures = 0;
                     s.locked_until = None;
-                    s.last_ok = Some(clock::now_ms());
                 });
                 Ok(client)
             }
